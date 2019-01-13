@@ -11,7 +11,10 @@
 */
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <sys/time.h>
 
+#define TS_PKTS_FOR_TEST 30*1000
 
 //stream cypher
 
@@ -210,7 +213,7 @@ void stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char
 //block cypher
 
 // key preparation
-unsigned char key_perm[0x40] = {
+uint8_t key_perm[0x40] = {
     0x12,0x24,0x09,0x07,0x2A,0x31,0x1D,0x15,0x1C,0x36,0x3E,0x32,0x13,0x21,0x3B,0x40,
     0x18,0x14,0x25,0x27,0x02,0x35,0x1B,0x01,0x22,0x04,0x0D,0x0E,0x39,0x28,0x1A,0x29,
     0x33,0x23,0x34,0x0C,0x16,0x30,0x1E,0x3A,0x2D,0x1F,0x08,0x19,0x17,0x2F,0x3D,0x11,
@@ -218,7 +221,7 @@ unsigned char key_perm[0x40] = {
 };
 
 // block - sbox
-unsigned char block_sbox[0x100] = {
+uint8_t block_sbox[0x100] = {
     0x3A,0xEA,0x68,0xFE,0x33,0xE9,0x88,0x1A,0x83,0xCF,0xE1,0x7F,0xBA,0xE2,0x38,0x12,
     0xE8,0x27,0x61,0x95,0x0C,0x36,0xE5,0x70,0xA2,0x06,0x82,0x7C,0x17,0xA3,0x26,0x49,
     0xBE,0x7A,0x6D,0x47,0xC1,0x51,0x8F,0xF3,0xCC,0x5B,0x67,0xBD,0xCD,0x18,0x08,0xC9,
@@ -239,7 +242,7 @@ unsigned char block_sbox[0x100] = {
 };
 
 // block - perm
-unsigned long block_perm[0x100] = {
+uint8_t block_perm[0x100] = {
     0x00,0x02,0x80,0x82,0x20,0x22,0xA0,0xA2, 0x10,0x12,0x90,0x92,0x30,0x32,0xB0,0xB2,
     0x04,0x06,0x84,0x86,0x24,0x26,0xA4,0xA6, 0x14,0x16,0x94,0x96,0x34,0x36,0xB4,0xB6,
     0x40,0x42,0xC0,0xC2,0x60,0x62,0xE0,0xE2, 0x50,0x52,0xD0,0xD2,0x70,0x72,0xF0,0xF2,
@@ -305,35 +308,23 @@ void key_schedule(uint8_t *CK, uint8_t *kk)
 
 void block_decypher(uint8_t *kk, uint8_t *ib, uint8_t *bd)
 {
-    int i;
-    int sbox_in;
-    int sbox_out;
-    int perm_out;
-    uint8_t R[8];
-    uint8_t next_R8;
+    int x,i;
+    uint8_t sbox_out;
+    uint8_t T[64];
 
-    *(uint64_t *)R = *(uint64_t *)ib;
+    *(uint64_t *)&T[56] = *(uint64_t *)ib;
 
-    // loop over kk[56]..kk[1]
     for(i=55; i>=0; i--)
     {
-        sbox_in = kk[i] ^ R[6];
-        sbox_out = block_sbox[sbox_in];
-        perm_out = block_perm[sbox_out];
-
-        next_R8 = R[6];
-        R[6] = R[5] ^ perm_out;
-        R[5] = R[4];
-        R[4] = R[3] ^ R[7] ^ sbox_out;
-        R[3] = R[2] ^ R[7] ^ sbox_out;
-        R[2] = R[1] ^ R[7] ^ sbox_out;
-        R[1] = R[0];
-        R[0] = R[7] ^ sbox_out;
-
-        R[7] = next_R8;
+        sbox_out = block_sbox[kk[i] ^ T[i+1+6]];
+        T[i+6] ^= block_perm[sbox_out];
+        T[i] = T[i+1+7] ^ sbox_out;
+        T[i+4] ^= T[i];
+        T[i+3] ^= T[i];
+        T[i+2] ^= T[i];
     }
 
-    *(uint64_t *)bd = *(uint64_t *)R;
+    *(uint64_t *)bd = *(uint64_t *)T;
 }
 
 
@@ -344,7 +335,7 @@ void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
     int sbox_out;
     int perm_out;
     uint8_t R[8];
-    uint8_t next_R1;
+    uint8_t next_R0;
 
     *(uint64_t *)R = *(uint64_t *)bd;
 
@@ -355,7 +346,7 @@ void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
         sbox_out = block_sbox[sbox_in];
         perm_out = block_perm[sbox_out];
 
-        next_R1 = R[1];
+        next_R0 = R[1];
         R[1] = R[2] ^ R[0];
         R[2] = R[3] ^ R[0];
         R[3] = R[4] ^ R[0];
@@ -364,7 +355,7 @@ void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
         R[6] = R[7];
         R[7] = R[0] ^ sbox_out;
 
-        R[0] = next_R1;
+        R[0] = next_R0;
     }
 
     *(uint64_t *)ib = *(uint64_t *)R;
@@ -498,16 +489,13 @@ unsigned char expected_kk1[] = {
 
 #define N 23 // assume TS packets, 184/8
 
-void decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
+void decrypt(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
 {
     int i,j;
-    uint8_t kk[56];
     unsigned char stream[8];
     unsigned char ib[8];
     unsigned char block[8];
     int fail;
-
-    key_schedule(ck,kk);
 
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++)
@@ -552,16 +540,13 @@ void decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypt
         the go forwards
         xor the ib[2..N] with the stream cypher to give the encrypted data, sb[2..N]
 */
-void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
+void encrypt(uint8_t *ck, uint8_t *kk, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
 {
     int i,j;
-    uint8_t kk[56];
     unsigned char stream[8];
     unsigned char ib[N+2][8];   // since we'll use 1..N and N+1 for IV
     unsigned char block[8];
     int fail;
-
-    key_schedule(ck,kk);
 
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++)
@@ -569,7 +554,6 @@ void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypt
 
 
     // ignore residue for now
-
 
     // last word
     // IV is really ib[n+1] = 0
@@ -608,9 +592,58 @@ void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypt
     printf("encryption %s\n",(fail) ? "failed" : "passed");
 }
 
+void bench(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *decrypted)
+{
+    int z,i,j;
+    unsigned char stream[8];
+    unsigned char ib[8];
+    unsigned char block[8];
+
+    for(z=0; z<TS_PKTS_FOR_TEST; z++) {
+        // 1st 4 bytes not encrypted
+        for(i=0; i<4; i++)
+            decrypted[i] = encrypted[i];
+
+        // 1st 8 bytes of initialisation
+        stream_cypher(1, ck, &encrypted[4], ib);
+
+        for(j=1; j<(N+1); j++)
+        {
+            block_decypher(kk, ib, block);
+
+            if (j != N)
+            {
+                stream_cypher(0, ck, NULL, stream);
+
+                // xor sb x stream
+                for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
+            }
+            else
+            {
+                // last block - sb[N+1] = IV(initialisation vetor)(=0)
+                for(i=0; i<8; i++)  ib[i] = 0;
+            }
+
+            // xor ib x block
+            for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
+        }
+    }
+}
+
 int main(void)
 {
-    decrypt(key1, encrypted1, decrypted1, expected1);
-    encrypt(key1, expected1, decrypted1, encrypted1);
+    uint8_t kk[56];
+    key_schedule(key1, kk);
+
+    decrypt(key1, kk, encrypted1, decrypted1, expected1);
+    // encrypt(key1, kk, expected1, decrypted1, encrypted1);
+
+    // struct timeval tvs, tve;
+    // gettimeofday(&tvs,NULL);
+    // bench(key1, kk, encrypted1, decrypted1);
+    // gettimeofday(&tve,NULL);
+    // fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+    // fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+
     return 0;
 }
