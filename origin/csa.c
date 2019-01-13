@@ -262,7 +262,7 @@ unsigned long block_perm[0x100] = {
 
 key_schedule(unsigned char *CK, int *kk)
 {
-    int i,j,k;
+    int i,j,k,v;
     int newbit[64];
     int kb[72];
 
@@ -274,25 +274,32 @@ key_schedule(unsigned char *CK, int *kk)
         kb[56 + 1 + j] = CK[j];
 
     // calculate kb[6] .. kb[1]
-    for(i=6; i>=0; i--)
+    for(i=48; i>=0; i-=8)
     {
         // 64 bit perm on kb
         for(j=0; j<8; j++)
+        {
+            v = kb[i + 1 + 8 + j];
             for(k=0; k<8; k++)
-                newbit[key_perm[j*8+k] - 1] = (kb[i * 8 + 8 + 1 + j] >> (7 - k)) & 1;
+                newbit[key_perm[(j << 3) + k] - 1] = (v >> (7 - k)) & 1;
+        }
 
         for(j=0; j<8; j++)
-            kb[i * 8 + 1 + j] = 0;
+        {
+            k = newbit[(j << 3)] << 7 |
+                newbit[(j << 3) + 1] << 6 |
+                newbit[(j << 3) + 2] << 5 |
+                newbit[(j << 3) + 3] << 4 |
+                newbit[(j << 3) + 4] << 3 |
+                newbit[(j << 3) + 5] << 2 |
+                newbit[(j << 3) + 6] << 1 |
+                newbit[(j << 3) + 7];
 
-        for(j=0;j<8;j++)
-            for(k=0;k<8;k++)
-                kb[i * 8 + 1 + j] |= newbit[j*8+k] << (7 - k);
+            v = 1 + i + j;
+            kb[v] = k;
+            kk[v] = kb[v + 8] ^ (i >> 3);
+        }
     }
-
-    // xor to give kk
-    for(i=0; i<7; i++)
-        for(j=0, k = i << 3; j<8; j++)
-            kk[1 + k + j] = kb[k + 8 + 1 + j] ^ i;
 
     return 0;
 }
