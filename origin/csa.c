@@ -259,7 +259,7 @@ unsigned long block_perm[0x100] = {
     0x4D,0x4F,0xCD,0xCF,0x6D,0x6F,0xED,0xEF, 0x5D,0x5F,0xDD,0xDF,0x7D,0x7F,0xFD,0xFF,
 };
 
-void key_schedule(uint8_t *CK, int *kk)
+void key_schedule(uint8_t *CK, uint8_t *kk)
 {
     int i,j,k,v;
     uint8_t newbit[64];
@@ -303,99 +303,71 @@ void key_schedule(uint8_t *CK, int *kk)
 
 
 
-void block_decypher(int *kk, unsigned char *ib, unsigned char *bd)
+void block_decypher(uint8_t *kk, uint8_t *ib, uint8_t *bd)
 {
     int i;
     int sbox_in;
     int sbox_out;
     int perm_out;
-    int R[9];
-    int next_R8;
+    uint8_t R[8];
+    uint8_t next_R8;
 
-    R[1] = ib[0];
-    R[2] = ib[1];
-    R[3] = ib[2];
-    R[4] = ib[3];
-    R[5] = ib[4];
-    R[6] = ib[5];
-    R[7] = ib[6];
-    R[8] = ib[7];
+    *(uint64_t *)R = *(uint64_t *)ib;
 
     // loop over kk[56]..kk[1]
     for(i=55; i>=0; i--)
+    {
+        sbox_in = kk[i] ^ R[6];
+        sbox_out = block_sbox[sbox_in];
+        perm_out = block_perm[sbox_out];
+
+        next_R8 = R[6];
+        R[6] = R[5] ^ perm_out;
+        R[5] = R[4];
+        R[4] = R[3] ^ R[7] ^ sbox_out;
+        R[3] = R[2] ^ R[7] ^ sbox_out;
+        R[2] = R[1] ^ R[7] ^ sbox_out;
+        R[1] = R[0];
+        R[0] = R[7] ^ sbox_out;
+
+        R[7] = next_R8;
+    }
+
+    *(uint64_t *)bd = *(uint64_t *)R;
+}
+
+
+void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
+{
+    int i;
+    int sbox_in;
+    int sbox_out;
+    int perm_out;
+    uint8_t R[8];
+    uint8_t next_R1;
+
+    *(uint64_t *)R = *(uint64_t *)bd;
+
+    // loop over kk[1]..kk[56]
+    for(i=0; i<56; i++)
     {
         sbox_in = kk[i] ^ R[7];
         sbox_out = block_sbox[sbox_in];
         perm_out = block_perm[sbox_out];
 
-        next_R8 = R[7];
-        R[7] = R[6] ^ perm_out;
-        R[6] = R[5];
-        R[5] = R[4] ^ R[8] ^ sbox_out;
-        R[4] = R[3] ^ R[8] ^ sbox_out;
-        R[3] = R[2] ^ R[8] ^ sbox_out;
-        R[2] = R[1];
-        R[1] = R[8] ^ sbox_out;
+        next_R1 = R[1];
+        R[1] = R[2] ^ R[0];
+        R[2] = R[3] ^ R[0];
+        R[3] = R[4] ^ R[0];
+        R[4] = R[5];
+        R[5] = R[6] ^ perm_out;
+        R[6] = R[7];
+        R[7] = R[0] ^ sbox_out;
 
-        R[8] = next_R8;
+        R[0] = next_R1;
     }
 
-    bd[0] = R[1];
-    bd[1] = R[2];
-    bd[2] = R[3];
-    bd[3] = R[4];
-    bd[4] = R[5];
-    bd[5] = R[6];
-    bd[6] = R[7];
-    bd[7] = R[8];
-}
-
-
-void block_encypher(int *kk, unsigned char *bd, unsigned char *ib)
-{
-    int i;
-    int sbox_in;
-    int sbox_out;
-    int perm_out;
-    int R[9];
-    int next_R1;
-
-    R[1] = bd[0];
-    R[2] = bd[1];
-    R[3] = bd[2];
-    R[4] = bd[3];
-    R[5] = bd[4];
-    R[6] = bd[5];
-    R[7] = bd[6];
-    R[8] = bd[7];
-
-    // loop over kk[1]..kk[56]
-    for(i=0; i<56; i++)
-    {
-        sbox_in = kk[i] ^ R[8];
-        sbox_out = block_sbox[sbox_in];
-        perm_out = block_perm[sbox_out];
-
-        next_R1 = R[2];
-        R[2] = R[3] ^ R[1];
-        R[3] = R[4] ^ R[1];
-        R[4] = R[5] ^ R[1];
-        R[5] = R[6];
-        R[6] = R[7] ^ perm_out;
-        R[7] = R[8];
-        R[8] = R[1] ^ sbox_out;
-
-        R[1] = next_R1;
-    }
-
-    ib[0] = R[1];
-    ib[1] = R[2];
-    ib[2] = R[3];
-    ib[3] = R[4];
-    ib[4] = R[5];
-    ib[5] = R[6];
-    ib[6] = R[7];
-    ib[7] = R[8];
+    *(uint64_t *)ib = *(uint64_t *)R;
 }
 
 
@@ -529,7 +501,7 @@ unsigned char expected_kk1[] = {
 void decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
 {
     int i,j;
-    int kk[56];
+    uint8_t kk[56];
     unsigned char stream[8];
     unsigned char ib[8];
     unsigned char block[8];
@@ -583,7 +555,7 @@ void decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypt
 void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
 {
     int i,j;
-    int kk[56];
+    uint8_t kk[56];
     unsigned char stream[8];
     unsigned char ib[N+2][8];   // since we'll use 1..N and N+1 for IV
     unsigned char block[8];
@@ -639,6 +611,6 @@ void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypt
 int main(void)
 {
     decrypt(key1, encrypted1, decrypted1, expected1);
-    // encrypt(key1, expected1, decrypted1, encrypted1);
+    encrypt(key1, expected1, decrypted1, encrypted1);
     return 0;
 }
