@@ -10,7 +10,7 @@
 
 */
 #include <stdio.h>
-
+#include <stdint.h>
 
 
 //stream cypher
@@ -38,7 +38,7 @@ int sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,
 int sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
 int sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
-int stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char *cb)
+void stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char *cb)
 {
     int i,j;
     int in1;        // most  significant nibble of input byte
@@ -202,7 +202,6 @@ int stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char 
         // return input data during init
         cb[i] = (init) ? sb[i] : op;
     }
-    return 0;
 }
 
 
@@ -260,54 +259,51 @@ unsigned long block_perm[0x100] = {
     0x4D,0x4F,0xCD,0xCF,0x6D,0x6F,0xED,0xEF, 0x5D,0x5F,0xDD,0xDF,0x7D,0x7F,0xFD,0xFF,
 };
 
-key_schedule(unsigned char *CK, int *kk)
+void key_schedule(uint8_t *CK, int *kk)
 {
     int i,j,k,v;
-    int newbit[64];
-    int kb[72];
+    uint8_t newbit[64];
+    uint8_t kb[64];
 
     // 56 steps
     // 56 key bytes kk(56)..kk(1) by key schedule from CK
 
     // kb(7,1) .. kb(7,8) = CK(1) .. CK(8)
-    for(j=0; j<8; j++)
-        kb[56 + 1 + j] = CK[j];
+    *(uint64_t *)(&kb[56]) = *(uint64_t *)(CK);
 
     // calculate kb[6] .. kb[1]
     for(i=48; i>=0; i-=8)
     {
         // 64 bit perm on kb
-        for(j=0; j<8; j++)
+        for(j=0; j<=56; j+=8)
         {
-            v = kb[i + 1 + 8 + j];
+            v = i + (j >> 3);
+            v = kb[8 + v];
             for(k=0; k<8; k++)
-                newbit[key_perm[(j << 3) + k] - 1] = (v >> (7 - k)) & 1;
+                newbit[key_perm[j + k] - 1] = (v >> (7 - k)) & 1;
         }
 
-        for(j=0; j<8; j++)
+        for(j=0; j<=56; j+=8)
         {
-            k = newbit[(j << 3)] << 7 |
-                newbit[(j << 3) + 1] << 6 |
-                newbit[(j << 3) + 2] << 5 |
-                newbit[(j << 3) + 3] << 4 |
-                newbit[(j << 3) + 4] << 3 |
-                newbit[(j << 3) + 5] << 2 |
-                newbit[(j << 3) + 6] << 1 |
-                newbit[(j << 3) + 7];
-
-            v = 1 + i + j;
-            kb[v] = k;
-            kk[v] = kb[v + 8] ^ (i >> 3);
+            v = i + (j >> 3);
+            kb[v] =
+                newbit[j + 0] << 7 |
+                newbit[j + 1] << 6 |
+                newbit[j + 2] << 5 |
+                newbit[j + 3] << 4 |
+                newbit[j + 4] << 3 |
+                newbit[j + 5] << 2 |
+                newbit[j + 6] << 1 |
+                newbit[j + 7];
+            kk[v] = kb[8 + v] ^ (i >> 3);
         }
     }
-
-    return 0;
 }
 
 
 
 
-int block_decypher(int *kk, unsigned char *ib, unsigned char *bd)
+void block_decypher(int *kk, unsigned char *ib, unsigned char *bd)
 {
     int i;
     int sbox_in;
@@ -326,7 +322,7 @@ int block_decypher(int *kk, unsigned char *ib, unsigned char *bd)
     R[8] = ib[7];
 
     // loop over kk[56]..kk[1]
-    for(i=56; i>0; i--)
+    for(i=55; i>=0; i--)
     {
         sbox_in = kk[i] ^ R[7];
         sbox_out = block_sbox[sbox_in];
@@ -352,12 +348,10 @@ int block_decypher(int *kk, unsigned char *ib, unsigned char *bd)
     bd[5] = R[6];
     bd[6] = R[7];
     bd[7] = R[8];
-
-    return 0;
 }
 
 
-int block_encypher(int *kk, unsigned char *bd, unsigned char *ib)
+void block_encypher(int *kk, unsigned char *bd, unsigned char *ib)
 {
     int i;
     int sbox_in;
@@ -376,7 +370,7 @@ int block_encypher(int *kk, unsigned char *bd, unsigned char *ib)
     R[8] = bd[7];
 
     // loop over kk[1]..kk[56]
-    for(i=1; i<=56; i++)
+    for(i=0; i<56; i++)
     {
         sbox_in = kk[i] ^ R[8];
         sbox_out = block_sbox[sbox_in];
@@ -402,8 +396,6 @@ int block_encypher(int *kk, unsigned char *bd, unsigned char *ib)
     ib[5] = R[6];
     ib[6] = R[7];
     ib[7] = R[8];
-
-    return 0;
 }
 
 
@@ -534,22 +526,16 @@ unsigned char expected_kk1[] = {
 
 #define N 23 // assume TS packets, 184/8
 
-int decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
+void decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
 {
     int i,j;
-    int kk[57];
+    int kk[56];
     unsigned char stream[8];
     unsigned char ib[8];
     unsigned char block[8];
     int fail;
 
     key_schedule(ck,kk);
-    printf("\nkey schedule, kk[1]..kk[56] = ");
-    for(i=1; i<57; i++)
-    {
-        if ((i % 16) == 1) printf("\n    ");
-        printf("%02x ",kk[i]);
-    }
 
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++)
@@ -557,17 +543,14 @@ int decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypte
 
     // 1st 8 bytes of initialisation
     stream_cypher(1, ck, &encrypted[4], ib);
-    printf("\nib[ 1]  = %02x %02x %02x %02x %02x %02x %02x %02x ",ib[0],ib[1],ib[2],ib[3],ib[4],ib[5],ib[6],ib[7]);
 
     for(j=1; j<(N+1); j++)
     {
         block_decypher(kk, ib, block);
-        printf("\nblock   = %02x %02x %02x %02x %02x %02x %02x %02x ",block[0],block[1],block[2],block[3],block[4],block[5],block[6],block[7]);
 
         if (j != N)
         {
             stream_cypher(0, ck, NULL, stream);
-            printf("\nstream  = %02x %02x %02x %02x %02x %02x %02x %02x ",stream[0],stream[1],stream[2],stream[3],stream[4],stream[5],stream[6],stream[7]);
 
             // xor sb x stream
             for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
@@ -577,26 +560,9 @@ int decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypte
             // last block - sb[N+1] = IV(initialisation vetor)(=0)
             for(i=0; i<8; i++)  ib[i] = 0;
         }
-        printf("\nib[%2d]  = %02x %02x %02x %02x %02x %02x %02x %02x ",j+1,ib[0],ib[1],ib[2],ib[3],ib[4],ib[5],ib[6],ib[7]);
 
         // xor ib x block
         for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
-        printf("\ndecrypt = %02x %02x %02x %02x %02x %02x %02x %02x ",decrypted[4+8*(j-1)+0],decrypted[4+8*(j-1)+1],decrypted[4+8*(j-1)+2],decrypted[4+8*(j-1)+3],decrypted[4+8*(j-1)+4],decrypted[4+8*(j-1)+5],decrypted[4+8*(j-1)+6],decrypted[4+8*(j-1)+7]);
-    }
-
-
-    printf("\ndecrypted");
-    for(i=0; i<188; i++)
-    {
-        if (!(i%0x10)) printf("\n%04x - ",i);
-        printf("%02x ",decrypted[i]);
-    }
-
-    printf("\nexpected");
-    for(i=0; i<188; i++)
-    {
-        if (!(i%0x10)) printf("\n%04x - ",i);
-        printf("%02x ",expected[i]);
     }
 
     fail = 0;
@@ -604,9 +570,7 @@ int decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypte
     {
         if (decrypted[i] != expected[i]) fail = 1;
     }
-    printf("\n\ndecryption %s\n",(fail) ? "failed" : "passed");
-
-    return fail;
+    printf("decryption %s\n",(fail) ? "failed" : "passed");
 }
 
 /*
@@ -616,22 +580,16 @@ int decrypt(unsigned char *ck, unsigned char *encrypted, unsigned char *decrypte
         the go forwards
         xor the ib[2..N] with the stream cypher to give the encrypted data, sb[2..N]
 */
-int encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
+void encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
 {
     int i,j;
-    int kk[57];
+    int kk[56];
     unsigned char stream[8];
     unsigned char ib[N+2][8];   // since we'll use 1..N and N+1 for IV
     unsigned char block[8];
     int fail;
 
     key_schedule(ck,kk);
-    printf("\nkey schedule, kk[1]..kk[56] = ");
-    for(i=1; i<57; i++)
-    {
-        if ((i % 16) == 1) printf("\n    ");
-        printf("%02x ",kk[i]);
-    }
 
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++)
@@ -649,9 +607,7 @@ int encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypte
     {
         // xor db x ib[n][j]
         for(i=0; i<8; i++)  block[i] = decrypted[4+(j*8)-8+i] ^ ib[j+1][i];
-        printf("\nblock   = %02x %02x %02x %02x %02x %02x %02x %02x ",block[0],block[1],block[2],block[3],block[4],block[5],block[6],block[7]);
         block_encypher(kk, block, ib[j]);
-        printf("\nib[%2d]  = %02x %02x %02x %02x %02x %02x %02x %02x ",j,ib[j][0],ib[j][1],ib[j][2],ib[j][3],ib[j][4],ib[j][5],ib[j][6],ib[j][7]);
     }
 
     // ib is now ib[1] which is in fact sb[1]
@@ -668,26 +624,8 @@ int encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypte
     for(j=2; j<(N+1); j++)
     {
         stream_cypher(0, ck, ib[j], stream);
-        printf("\nstream  = %02x %02x %02x %02x %02x %02x %02x %02x ",stream[0],stream[1],stream[2],stream[3],stream[4],stream[5],stream[6],stream[7]);
-
         // xor ib x stream
         for(i=0; i<8; i++)  encrypted[4+8*(j-1)+i] = ib[j][i] ^ stream[i];
-        printf("\nencrypt = %02x %02x %02x %02x %02x %02x %02x %02x ",encrypted[4+8*(j-1)+0],encrypted[4+8*(j-1)+1],encrypted[4+8*(j-1)+2],encrypted[4+8*(j-1)+3],encrypted[4+8*(j-1)+4],encrypted[4+8*(j-1)+5],encrypted[4+8*(j-1)+6],encrypted[4+8*(j-1)+7]);
-    }
-
-
-    printf("\nencrypted");
-    for(i=0; i<188; i++)
-    {
-        if (!(i%0x10)) printf("\n%04x - ",i);
-        printf("%02x ",encrypted[i]);
-    }
-
-    printf("\nexpected");
-    for(i=0; i<188; i++)
-    {
-        if (!(i%0x10)) printf("\n%04x - ",i);
-        printf("%02x ",expected[i]);
     }
 
     fail = 0;
@@ -695,15 +633,12 @@ int encrypt(unsigned char *ck, unsigned char *decrypted, unsigned char *encrypte
     {
         if (encrypted[i] != expected[i]) fail = 1;
     }
-    printf("\n\nencryption %s\n",(fail) ? "failed" : "passed");
-
-    return fail;
+    printf("encryption %s\n",(fail) ? "failed" : "passed");
 }
 
-main()
+int main(void)
 {
-    printf("csa v0.10\n");
-
     decrypt(key1, encrypted1, decrypted1, expected1);
     // encrypt(key1, expected1, decrypted1, encrypted1);
+    return 0;
 }
