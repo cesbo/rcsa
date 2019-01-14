@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/time.h>
+#include <string.h>
 
 #define TS_PKTS_FOR_TEST 30*1000
 
@@ -41,29 +42,39 @@ int sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,
 int sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
 int sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
-void stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char *cb)
+typedef struct {
+    uint8_t cw[8];
+
+    // block cypher
+    uint8_t kk[56];
+
+    // stream cypher
+    uint8_t A[10];
+    uint8_t B[10];
+    uint8_t X;
+    uint8_t Y;
+    uint8_t Z;
+    uint8_t D;
+    uint8_t E;
+    uint8_t F;
+    uint8_t p;
+    uint8_t q;
+    uint8_t r;
+} csa_ctx_t;
+
+void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j;
-    int in1;        // most  significant nibble of input byte
-    int in2;        // least significant nibble of input byte
-    int op;
-    int extra_B;
-    int s1,s2,s3,s4,s5,s6,s7;
-    int next_A1;
-    int next_B1;
-    int next_E;
+    uint8_t in1;        // most  significant nibble of input byte
+    uint8_t in2;        // least significant nibble of input byte
+    uint8_t op;
+    uint8_t extra_B;
+    uint8_t s1,s2,s3,s4,s5,s6,s7;
+    uint8_t next_A1;
+    uint8_t next_B1;
+    uint8_t next_E;
 
-    static int A[11];
-    static int B[11];
-    static int X;
-    static int Y;
-    static int Z;
-    static int D;
-    static int E;
-    static int F;
-    static int p;
-    static int q;
-    static int r;
+
 
     // reset
     if (init)
@@ -71,36 +82,36 @@ void stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char
         // load first 32 bits of CK into A[1]..A[8]
         // load last  32 bits of CK into B[1]..B[8]
         // all other regs = 0
-        A[1] = (CK[0] >> 4) & 0xf;
-        A[2] = (CK[0] >> 0) & 0xf;
-        A[3] = (CK[1] >> 4) & 0xf;
-        A[4] = (CK[1] >> 0) & 0xf;
-        A[5] = (CK[2] >> 4) & 0xf;
-        A[6] = (CK[2] >> 0) & 0xf;
-        A[7] = (CK[3] >> 4) & 0xf;
-        A[8] = (CK[3] >> 0) & 0xf;
-        A[9] = 0;
-        A[10] = 0;
-        B[1] = (CK[4] >> 4) & 0xf;
-        B[2] = (CK[4] >> 0) & 0xf;
-        B[3] = (CK[5] >> 4) & 0xf;
-        B[4] = (CK[5] >> 0) & 0xf;
-        B[5] = (CK[6] >> 4) & 0xf;
-        B[6] = (CK[6] >> 0) & 0xf;
-        B[7] = (CK[7] >> 4) & 0xf;
-        B[8] = (CK[7] >> 0) & 0xf;
-        B[9] = 0;
-        B[10] = 0;
+        ctx->A[0] = (ctx->cw[0] >> 4) & 0xf;
+        ctx->A[1] = (ctx->cw[0] >> 0) & 0xf;
+        ctx->A[2] = (ctx->cw[1] >> 4) & 0xf;
+        ctx->A[3] = (ctx->cw[1] >> 0) & 0xf;
+        ctx->A[4] = (ctx->cw[2] >> 4) & 0xf;
+        ctx->A[5] = (ctx->cw[2] >> 0) & 0xf;
+        ctx->A[6] = (ctx->cw[3] >> 4) & 0xf;
+        ctx->A[7] = (ctx->cw[3] >> 0) & 0xf;
+        ctx->A[8] = 0;
+        ctx->A[9] = 0;
+        ctx->B[0] = (ctx->cw[4] >> 4) & 0xf;
+        ctx->B[1] = (ctx->cw[4] >> 0) & 0xf;
+        ctx->B[2] = (ctx->cw[5] >> 4) & 0xf;
+        ctx->B[3] = (ctx->cw[5] >> 0) & 0xf;
+        ctx->B[4] = (ctx->cw[6] >> 4) & 0xf;
+        ctx->B[5] = (ctx->cw[6] >> 0) & 0xf;
+        ctx->B[6] = (ctx->cw[7] >> 4) & 0xf;
+        ctx->B[7] = (ctx->cw[7] >> 0) & 0xf;
+        ctx->B[8] = 0;
+        ctx->B[9] = 0;
 
-        X=0;
-        Y=0;
-        Z=0;
-        D=0;
-        E=0;
-        F=0;
-        p=0;
-        q=0;
-        r=0;
+        ctx->X = 0;
+        ctx->Y = 0;
+        ctx->Z = 0;
+        ctx->D = 0;
+        ctx->E = 0;
+        ctx->F = 0;
+        ctx->p = 0;
+        ctx->q = 0;
+        ctx->r = 0;
     }
 
     // 8 bytes per operation
@@ -117,90 +128,90 @@ void stream_cypher(int init, unsigned char *CK, unsigned char *sb, unsigned char
         {
             // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[ (((A[4]>>0)&1)<<4) | (((A[1]>>2)&1)<<3) | (((A[6]>>1)&1)<<2) | (((A[7]>>3)&1)<<1) | (((A[9]>>0)&1)<<0) ];
-            s2 = sbox2[ (((A[2]>>1)&1)<<4) | (((A[3]>>2)&1)<<3) | (((A[6]>>3)&1)<<2) | (((A[7]>>0)&1)<<1) | (((A[9]>>1)&1)<<0) ];
-            s3 = sbox3[ (((A[1]>>3)&1)<<4) | (((A[2]>>0)&1)<<3) | (((A[5]>>1)&1)<<2) | (((A[5]>>3)&1)<<1) | (((A[6]>>2)&1)<<0) ];
-            s4 = sbox4[ (((A[3]>>3)&1)<<4) | (((A[1]>>1)&1)<<3) | (((A[2]>>3)&1)<<2) | (((A[4]>>2)&1)<<1) | (((A[8]>>0)&1)<<0) ];
-            s5 = sbox5[ (((A[5]>>2)&1)<<4) | (((A[4]>>3)&1)<<3) | (((A[6]>>0)&1)<<2) | (((A[8]>>1)&1)<<1) | (((A[9]>>2)&1)<<0) ];
-            s6 = sbox6[ (((A[3]>>1)&1)<<4) | (((A[4]>>1)&1)<<3) | (((A[5]>>0)&1)<<2) | (((A[7]>>2)&1)<<1) | (((A[9]>>3)&1)<<0) ];
-            s7 = sbox7[ (((A[2]>>2)&1)<<4) | (((A[3]>>0)&1)<<3) | (((A[7]>>1)&1)<<2) | (((A[8]>>2)&1)<<1) | (((A[8]>>3)&1)<<0) ];
+            s1 = sbox1[ (((ctx->A[3]>>0)&1)<<4) | (((ctx->A[0]>>2)&1)<<3) | (((ctx->A[5]>>1)&1)<<2) | (((ctx->A[6]>>3)&1)<<1) | (((ctx->A[8]>>0)&1)<<0) ];
+            s2 = sbox2[ (((ctx->A[1]>>1)&1)<<4) | (((ctx->A[2]>>2)&1)<<3) | (((ctx->A[5]>>3)&1)<<2) | (((ctx->A[6]>>0)&1)<<1) | (((ctx->A[8]>>1)&1)<<0) ];
+            s3 = sbox3[ (((ctx->A[0]>>3)&1)<<4) | (((ctx->A[1]>>0)&1)<<3) | (((ctx->A[4]>>1)&1)<<2) | (((ctx->A[4]>>3)&1)<<1) | (((ctx->A[5]>>2)&1)<<0) ];
+            s4 = sbox4[ (((ctx->A[2]>>3)&1)<<4) | (((ctx->A[0]>>1)&1)<<3) | (((ctx->A[1]>>3)&1)<<2) | (((ctx->A[3]>>2)&1)<<1) | (((ctx->A[7]>>0)&1)<<0) ];
+            s5 = sbox5[ (((ctx->A[4]>>2)&1)<<4) | (((ctx->A[3]>>3)&1)<<3) | (((ctx->A[5]>>0)&1)<<2) | (((ctx->A[7]>>1)&1)<<1) | (((ctx->A[8]>>2)&1)<<0) ];
+            s6 = sbox6[ (((ctx->A[2]>>1)&1)<<4) | (((ctx->A[3]>>1)&1)<<3) | (((ctx->A[4]>>0)&1)<<2) | (((ctx->A[6]>>2)&1)<<1) | (((ctx->A[8]>>3)&1)<<0) ];
+            s7 = sbox7[ (((ctx->A[1]>>2)&1)<<4) | (((ctx->A[2]>>0)&1)<<3) | (((ctx->A[6]>>1)&1)<<2) | (((ctx->A[7]>>2)&1)<<1) | (((ctx->A[7]>>3)&1)<<0) ];
 
             // use 4x4 xor to produce extra nibble for T3
-            extra_B = ( ((B[3]&1)<<3) ^ ((B[6]&2)<<2) ^ ((B[7]&4)<<1) ^ ((B[9]&8)>>0) ) |
-                      ( ((B[6]&1)<<2) ^ ((B[8]&2)<<1) ^ ((B[3]&8)>>1) ^ ((B[4]&4)>>0) ) |
-                      ( ((B[5]&8)>>2) ^ ((B[8]&4)>>1) ^ ((B[4]&1)<<1) ^ ((B[5]&2)>>0) ) |
-                      ( ((B[9]&4)>>2) ^ ((B[6]&8)>>3) ^ ((B[3]&2)>>1) ^ ((B[8]&1)>>0) ) ;
+            extra_B = ( ((ctx->B[2]&1)<<3) ^ ((ctx->B[5]&2)<<2) ^ ((ctx->B[6]&4)<<1) ^ ((ctx->B[8]&8)>>0) ) |
+                      ( ((ctx->B[5]&1)<<2) ^ ((ctx->B[7]&2)<<1) ^ ((ctx->B[2]&8)>>1) ^ ((ctx->B[3]&4)>>0) ) |
+                      ( ((ctx->B[4]&8)>>2) ^ ((ctx->B[7]&4)>>1) ^ ((ctx->B[3]&1)<<1) ^ ((ctx->B[4]&2)>>0) ) |
+                      ( ((ctx->B[8]&4)>>2) ^ ((ctx->B[5]&8)>>3) ^ ((ctx->B[2]&2)>>1) ^ ((ctx->B[7]&1)>>0) ) ;
 
 
 
             // T1 = xor all inputs
             // in1,in2, D are only used in T1 during initialisation, not generation
-            next_A1 = A[10] ^ X;
-            if (init) next_A1 = next_A1 ^ D ^ ((j % 2) ? in2 : in1);
+            next_A1 = ctx->A[9] ^ ctx->X;
+            if (init) next_A1 = next_A1 ^ ctx->D ^ ((j % 2) ? in2 : in1);
 
 
             // T2 =  xor all inputs
             // in1,in2 are only used in T1 during initialisation, not generation
             // if p=0, use this, if p=1, rotate the result left
-            next_B1 = B[7] ^ B[10] ^ Y;
+            next_B1 = ctx->B[6] ^ ctx->B[9] ^ ctx->Y;
             if (init) next_B1 = next_B1 ^ ((j % 2) ? in1 : in2);
 
             // if p=1, rotate left
-            if (p) next_B1 = ( (next_B1 << 1) | ((next_B1 >> 3) & 1) ) & 0xf;
+            if (ctx->p) next_B1 = ( (next_B1 << 1) | ((next_B1 >> 3) & 1) ) & 0xf;
 
 
             // T3 = xor all inputs
-            D = E ^ Z ^ extra_B;
+            ctx->D = ctx->E ^ ctx->Z ^ extra_B;
 
 
             // T4 = sum, carry of Z + E + r
-            next_E = F;
-            if (q)
+            next_E = ctx->F;
+            if (ctx->q)
             {
-                F = Z + E + r;
+                ctx->F = ctx->Z + ctx->E + ctx->r;
                 // r is the carry
-                r = (F >> 4) & 1;
-                F = F & 0x0f;
+                ctx->r = (ctx->F >> 4) & 1;
+                ctx->F = ctx->F & 0x0f;
             }
             else
             {
-                F = E;
+                ctx->F = ctx->E;
             }
-            E = next_E;
+            ctx->E = next_E;
 
 
-            A[10] = A[9];
-            A[9] = A[8];
-            A[8] = A[7];
-            A[7] = A[6];
-            A[6] = A[5];
-            A[5] = A[4];
-            A[4] = A[3];
-            A[3] = A[2];
-            A[2] = A[1];
-            A[1]= next_A1;
+            ctx->A[9] = ctx->A[8];
+            ctx->A[8] = ctx->A[7];
+            ctx->A[7] = ctx->A[6];
+            ctx->A[6] = ctx->A[5];
+            ctx->A[5] = ctx->A[4];
+            ctx->A[4] = ctx->A[3];
+            ctx->A[3] = ctx->A[2];
+            ctx->A[2] = ctx->A[1];
+            ctx->A[1] = ctx->A[0];
+            ctx->A[0]= next_A1;
 
-            B[10] = B[9];
-            B[9] = B[8];
-            B[8] = B[7];
-            B[7] = B[6];
-            B[6] = B[5];
-            B[5] = B[4];
-            B[4] = B[3];
-            B[3] = B[2];
-            B[2] = B[1];
-            B[1] = next_B1;
+            ctx->B[9] = ctx->B[8];
+            ctx->B[8] = ctx->B[7];
+            ctx->B[7] = ctx->B[6];
+            ctx->B[6] = ctx->B[5];
+            ctx->B[5] = ctx->B[4];
+            ctx->B[4] = ctx->B[3];
+            ctx->B[3] = ctx->B[2];
+            ctx->B[2] = ctx->B[1];
+            ctx->B[1] = ctx->B[0];
+            ctx->B[0] = next_B1;
 
-            X = ((s4&1)<<3) | ((s3&1)<<2) | (s2&2) | ((s1&2)>>1);
-            Y = ((s6&1)<<3) | ((s5&1)<<2) | (s4&2) | ((s3&2)>>1);
-            Z = ((s2&1)<<3) | ((s1&1)<<2) | (s6&2) | ((s5&2)>>1);
-            p = (s7&2)>>1;
-            q = (s7&1);
+            ctx->X = ((s4&1)<<3) | ((s3&1)<<2) | (s2&2) | ((s1&2)>>1);
+            ctx->Y = ((s6&1)<<3) | ((s5&1)<<2) | (s4&2) | ((s3&2)>>1);
+            ctx->Z = ((s2&1)<<3) | ((s1&1)<<2) | (s6&2) | ((s5&2)>>1);
+            ctx->p = (s7&2)>>1;
+            ctx->q = (s7&1);
 
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
             // xor 2 by 2
-            op = (op << 2)^ ( (((D^(D>>1))>>1)&2) | ((D^(D>>1))&1) );
+            op = (op << 2)^ ( (((ctx->D^(ctx->D>>1))>>1)&2) | ((ctx->D^(ctx->D>>1))&1) );
         }
         // return input data during init
         cb[i] = (init) ? sb[i] : op;
@@ -262,17 +273,15 @@ uint8_t block_perm[0x100] = {
     0x4D,0x4F,0xCD,0xCF,0x6D,0x6F,0xED,0xEF, 0x5D,0x5F,0xDD,0xDF,0x7D,0x7F,0xFD,0xFF,
 };
 
-void key_schedule(uint8_t *CK, uint8_t *kk)
+void key_schedule(csa_ctx_t *ctx, uint8_t *cw)
 {
     int i,j,k,v;
     uint8_t newbit[64];
     uint8_t kb[64];
 
-    // 56 steps
-    // 56 key bytes kk(56)..kk(1) by key schedule from CK
-
-    // kb(7,1) .. kb(7,8) = CK(1) .. CK(8)
-    *(uint64_t *)(&kb[56]) = *(uint64_t *)(CK);
+    memset(ctx, 0, sizeof(ctx));
+    *(uint64_t *)(ctx->cw) = *(uint64_t *)(cw);
+    *(uint64_t *)(&kb[56]) = *(uint64_t *)(cw);
 
     // calculate kb[6] .. kb[1]
     for(i=48; i>=0; i-=8)
@@ -298,7 +307,7 @@ void key_schedule(uint8_t *CK, uint8_t *kk)
                 newbit[j + 5] << 2 |
                 newbit[j + 6] << 1 |
                 newbit[j + 7];
-            kk[v] = kb[8 + v] ^ (i >> 3);
+            ctx->kk[v] = kb[8 + v] ^ (i >> 3);
         }
     }
 }
@@ -306,7 +315,7 @@ void key_schedule(uint8_t *CK, uint8_t *kk)
 
 
 
-void block_decypher(uint8_t *kk, uint8_t *ib, uint8_t *bd)
+void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
 {
     int x,i;
     uint8_t sbox_out;
@@ -316,7 +325,7 @@ void block_decypher(uint8_t *kk, uint8_t *ib, uint8_t *bd)
 
     for(i=55; i>=0; i--)
     {
-        sbox_out = block_sbox[kk[i] ^ T[i+1+6]];
+        sbox_out = block_sbox[ctx->kk[i] ^ T[i+1+6]];
         T[i+6] ^= block_perm[sbox_out];
         T[i] = T[i+1+7] ^ sbox_out;
         T[i+4] ^= T[i];
@@ -328,7 +337,7 @@ void block_decypher(uint8_t *kk, uint8_t *ib, uint8_t *bd)
 }
 
 
-void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
+void block_encypher(csa_ctx_t *ctx, uint8_t *bd, uint8_t *ib)
 {
     int i;
     int sbox_in;
@@ -342,7 +351,7 @@ void block_encypher(uint8_t *kk, uint8_t *bd, uint8_t *ib)
     // loop over kk[1]..kk[56]
     for(i=0; i<56; i++)
     {
-        sbox_in = kk[i] ^ R[7];
+        sbox_in = ctx->kk[i] ^ R[7];
         sbox_out = block_sbox[sbox_in];
         perm_out = block_perm[sbox_out];
 
@@ -489,7 +498,7 @@ unsigned char expected_kk1[] = {
 
 #define N 23 // assume TS packets, 184/8
 
-void decrypt(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
+void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
 {
     int i,j;
     unsigned char stream[8];
@@ -502,15 +511,15 @@ void decrypt(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *
         decrypted[i] = encrypted[i];
 
     // 1st 8 bytes of initialisation
-    stream_cypher(1, ck, &encrypted[4], ib);
+    stream_cypher(1, ctx, &encrypted[4], ib);
 
     for(j=1; j<(N+1); j++)
     {
-        block_decypher(kk, ib, block);
+        block_decypher(ctx, ib, block);
 
         if (j != N)
         {
-            stream_cypher(0, ck, NULL, stream);
+            stream_cypher(0, ctx, NULL, stream);
 
             // xor sb x stream
             for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
@@ -540,7 +549,7 @@ void decrypt(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *
         the go forwards
         xor the ib[2..N] with the stream cypher to give the encrypted data, sb[2..N]
 */
-void encrypt(uint8_t *ck, uint8_t *kk, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
+void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
 {
     int i,j;
     unsigned char stream[8];
@@ -563,7 +572,7 @@ void encrypt(uint8_t *ck, uint8_t *kk, unsigned char *decrypted, unsigned char *
     {
         // xor db x ib[n][j]
         for(i=0; i<8; i++)  block[i] = decrypted[4+(j*8)-8+i] ^ ib[j+1][i];
-        block_encypher(kk, block, ib[j]);
+        block_encypher(ctx, block, ib[j]);
     }
 
     // ib is now ib[1] which is in fact sb[1]
@@ -572,14 +581,14 @@ void encrypt(uint8_t *ck, uint8_t *kk, unsigned char *decrypted, unsigned char *
 
 
     // 1st 8 bytes of initialisation - ib[1] has popped out of the last block cypher ...
-    stream_cypher(1, ck, ib[1], stream);
+    stream_cypher(1, ctx, ib[1], stream);
 
     // sb[1] is just ib[1];
     for(i=0; i<8; i++)  encrypted[4+0+i] = ib[1][i];
 
     for(j=2; j<(N+1); j++)
     {
-        stream_cypher(0, ck, ib[j], stream);
+        stream_cypher(0, ctx, ib[j], stream);
         // xor ib x stream
         for(i=0; i<8; i++)  encrypted[4+8*(j-1)+i] = ib[j][i] ^ stream[i];
     }
@@ -592,7 +601,7 @@ void encrypt(uint8_t *ck, uint8_t *kk, unsigned char *decrypted, unsigned char *
     printf("encryption %s\n",(fail) ? "failed" : "passed");
 }
 
-void bench(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *decrypted)
+void bench(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
 {
     int z,i,j;
     unsigned char stream[8];
@@ -605,15 +614,15 @@ void bench(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *de
             decrypted[i] = encrypted[i];
 
         // 1st 8 bytes of initialisation
-        stream_cypher(1, ck, &encrypted[4], ib);
+        stream_cypher(1, ctx, &encrypted[4], ib);
 
         for(j=1; j<(N+1); j++)
         {
-            block_decypher(kk, ib, block);
+            block_decypher(ctx, ib, block);
 
             if (j != N)
             {
-                stream_cypher(0, ck, NULL, stream);
+                stream_cypher(0, ctx, NULL, stream);
 
                 // xor sb x stream
                 for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
@@ -632,18 +641,18 @@ void bench(uint8_t *ck, uint8_t *kk, unsigned char *encrypted, unsigned char *de
 
 int main(void)
 {
-    uint8_t kk[56];
-    key_schedule(key1, kk);
+    csa_ctx_t ctx;
+    key_schedule(&ctx, key1);
 
-    decrypt(key1, kk, encrypted1, decrypted1, expected1);
-    // encrypt(key1, kk, expected1, decrypted1, encrypted1);
+    decrypt(&ctx, encrypted1, decrypted1, expected1);
+    encrypt(&ctx, expected1, decrypted1, encrypted1);
 
-    // struct timeval tvs, tve;
-    // gettimeofday(&tvs,NULL);
-    // bench(key1, kk, encrypted1, decrypted1);
-    // gettimeofday(&tve,NULL);
-    // fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
-    // fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+    struct timeval tvs, tve;
+    gettimeofday(&tvs,NULL);
+    bench(&ctx, encrypted1, decrypted1);
+    gettimeofday(&tve,NULL);
+    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
 
     return 0;
 }
