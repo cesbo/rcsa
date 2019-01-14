@@ -65,12 +65,12 @@ typedef struct {
     uint8_t s7;
 } csa_ctx_t;
 
+#define XOR_INPUTS(i1,i2,i3,i4) ( ((i1 & 1) << 3) | ((i2 & 1) << 2) | (i3 & 2) | ((i4 & 2) >> 1) )
+
 void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j,iT;
-    uint8_t in1;        // most  significant nibble of input byte
-    uint8_t in2;        // least significant nibble of input byte
-    uint8_t op;
+    uint8_t in[2]; // most+least significant nibble of input byte
     uint8_t Z;
     uint8_t next_E;
 
@@ -115,25 +115,25 @@ void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     // 8 bytes per operation
     for(i=0; i<8; i++)
     {
-        in1 = sb[i] >> 4;
-        in2 = sb[i] & 0xf;
+        in[0] = sb[i] >> 4;
+        in[1] = sb[i] & 0xf;
 
-        op = 0;
         // 2 bits per iteration
         for(j=0; j<4; j++)
         {
             iT = 31 - (i * 4 + j);
 
             // T1 = xor all inputs
-            Z = ((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1);
-            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z ^ ((j % 2) ? in2 : in1) ^ ctx->D;
+            Z = XOR_INPUTS(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
+            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z ^ in[(j & 1)] ^ ctx->D;
+
             // T2 =  xor all inputs
-            Z = ((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1);
-            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z ^ ((j % 2) ? in1 : in2);
+            Z = XOR_INPUTS(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
+            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z ^ in[(j & 1) ^ 1];
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
-            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
+            Z = XOR_INPUTS(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
             ctx->D = ctx->E ^ Z ^ (
                 ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
                 ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
@@ -166,12 +166,8 @@ void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             ctx->s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
             ctx->s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
             ctx->s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
-
-            // require 4 loops per output byte
-            // 2 output bits are a function of the 4 bits of D
-            // xor 2 by 2
-            op = (op << 2) ^ ( (((ctx->D ^ (ctx->D >> 1)) >> 1) & 2) | ((ctx->D ^ (ctx->D >> 1)) & 1) );
         }
+
         // return input data during init
         cb[i] = sb[i];
     }
@@ -184,14 +180,10 @@ void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
 void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
 {
-    int i,j;
-    uint8_t in1;        // most  significant nibble of input byte
-    uint8_t in2;        // least significant nibble of input byte
+    int i,j,iT;
     uint8_t op;
     uint8_t Z;
     uint8_t next_E;
-
-    int iT;
 
     // 8 bytes per operation
     for(i=0; i<8; i++)
@@ -203,15 +195,15 @@ void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
             iT = 31 - (i * 4 + j);
 
             // T1 = xor all inputs
-            Z = ((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1);
+            Z = XOR_INPUTS(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
             ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z;
             // T2 =  xor all inputs
-            Z = ((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1);
+            Z = XOR_INPUTS(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
             ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z;
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
-            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
+            Z = XOR_INPUTS(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
             ctx->D = ctx->E ^ Z ^ (
                 ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
                 ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
