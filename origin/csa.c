@@ -73,9 +73,6 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     uint8_t next_E;
 
     int iT;
-    bool once = (init != 0);
-
-
 
     // reset
     if (init)
@@ -129,28 +126,26 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         for(j=0; j<4; j++)
         {
             iT = 31 - (i * 4 + j);
-            // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
+            // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 0) & 1) << 0) ];
-            s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 1) & 1) << 0) ];
-            s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | (((ctx->A[iT + 1 + 5] >> 2) & 1) << 0) ];
-            s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 7] >> 0) & 1) << 0) ];
-            s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 2) & 1) << 0) ];
-            s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 3) & 1) << 0) ];
-            s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 7] >> 3) & 1) << 0) ];
+            s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
+            s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
+            s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
+            s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
+            s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
+            s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
+            s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
 
             // use 4x4 xor to produce extra nibble for T3
-            extra_B = ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ ((ctx->B[iT + 1 + 8] & 8) >> 0) ) |
-                      ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ ((ctx->B[iT + 1 + 3] & 4) >> 0) ) |
-                      ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ ((ctx->B[iT + 1 + 4] & 2) >> 0) ) |
-                      ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ ((ctx->B[iT + 1 + 7] & 1) >> 0) ) ;
-
+            extra_B = ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
+                      ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
+                      ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ (ctx->B[iT + 1 + 4] & 2) ) |
+                      ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) ;
 
             // T1 = xor all inputs
             // in1,in2, D are only used in T1 during initialisation, not generation
             ctx->A[iT] = ctx->A[iT + 1 + 9] ^ ctx->X;
             if (init) ctx->A[iT] ^= ctx->D ^ ((j % 2) ? in2 : in1);
-
 
             // T2 =  xor all inputs
             // in1,in2 are only used in T1 during initialisation, not generation
@@ -160,10 +155,8 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             // if p=1, rotate left
             if (ctx->p) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
 
-
             // T3 = xor all inputs
             ctx->D = ctx->E ^ ctx->Z ^ extra_B;
-
 
             // T4 = sum, carry of Z + E + r
             next_E = ctx->F;
@@ -628,14 +621,14 @@ int main(void)
     key_schedule(&ctx, key1);
 
     decrypt(&ctx, encrypted1, decrypted1, expected1);
-    encrypt(&ctx, expected1, decrypted1, encrypted1);
+    // encrypt(&ctx, expected1, decrypted1, encrypted1);
 
-    struct timeval tvs, tve;
-    gettimeofday(&tvs,NULL);
-    bench(&ctx, encrypted1, decrypted1);
-    gettimeofday(&tve,NULL);
-    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
-    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+    // struct timeval tvs, tve;
+    // gettimeofday(&tvs,NULL);
+    // bench(&ctx, encrypted1, decrypted1);
+    // gettimeofday(&tve,NULL);
+    // fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+    // fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
 
     return 0;
 }
