@@ -82,24 +82,24 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         // load first 32 bits of CK into A[1]..A[8]
         // load last  32 bits of CK into B[1]..B[8]
         // all other regs = 0
-        ctx->A[0] = (ctx->cw[0] >> 4) & 0xf;
-        ctx->A[1] = (ctx->cw[0] >> 0) & 0xf;
-        ctx->A[2] = (ctx->cw[1] >> 4) & 0xf;
-        ctx->A[3] = (ctx->cw[1] >> 0) & 0xf;
-        ctx->A[4] = (ctx->cw[2] >> 4) & 0xf;
-        ctx->A[5] = (ctx->cw[2] >> 0) & 0xf;
-        ctx->A[6] = (ctx->cw[3] >> 4) & 0xf;
-        ctx->A[7] = (ctx->cw[3] >> 0) & 0xf;
+        ctx->A[0] = ctx->cw[0] >> 4;
+        ctx->A[1] = ctx->cw[0] & 0xf;
+        ctx->A[2] = ctx->cw[1] >> 4;
+        ctx->A[3] = ctx->cw[1] & 0xf;
+        ctx->A[4] = ctx->cw[2] >> 4;
+        ctx->A[5] = ctx->cw[2] & 0xf;
+        ctx->A[6] = ctx->cw[3] >> 4;
+        ctx->A[7] = ctx->cw[3] & 0xf;
         ctx->A[8] = 0;
         ctx->A[9] = 0;
-        ctx->B[0] = (ctx->cw[4] >> 4) & 0xf;
-        ctx->B[1] = (ctx->cw[4] >> 0) & 0xf;
-        ctx->B[2] = (ctx->cw[5] >> 4) & 0xf;
-        ctx->B[3] = (ctx->cw[5] >> 0) & 0xf;
-        ctx->B[4] = (ctx->cw[6] >> 4) & 0xf;
-        ctx->B[5] = (ctx->cw[6] >> 0) & 0xf;
-        ctx->B[6] = (ctx->cw[7] >> 4) & 0xf;
-        ctx->B[7] = (ctx->cw[7] >> 0) & 0xf;
+        ctx->B[0] = ctx->cw[4] >> 4;
+        ctx->B[1] = ctx->cw[4] & 0xf;
+        ctx->B[2] = ctx->cw[5] >> 4;
+        ctx->B[3] = ctx->cw[5] & 0xf;
+        ctx->B[4] = ctx->cw[6] >> 4;
+        ctx->B[5] = ctx->cw[6] & 0xf;
+        ctx->B[6] = ctx->cw[7] >> 4;
+        ctx->B[7] = ctx->cw[7] & 0xf;
         ctx->B[8] = 0;
         ctx->B[9] = 0;
 
@@ -119,8 +119,8 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     {
         if (init)
         {
-            in1 = (sb[i] >> 4) & 0x0f;
-            in2 = (sb[i] >> 0) & 0x0f;
+            in1 = sb[i] >> 4;
+            in2 = sb[i] & 0xf;
         }
         op = 0;
         // 2 bits per iteration
