@@ -49,8 +49,8 @@ typedef struct {
     uint8_t kk[56];
 
     // stream cypher
-    uint8_t A[10];
-    uint8_t B[10];
+    uint8_t A[42];
+    uint8_t B[42];
     uint8_t X;
     uint8_t Y;
     uint8_t Z;
@@ -70,9 +70,10 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     uint8_t op;
     uint8_t extra_B;
     uint8_t s1,s2,s3,s4,s5,s6,s7;
-    uint8_t next_A1;
-    uint8_t next_B1;
     uint8_t next_E;
+
+    int iT;
+    bool once = (init != 0);
 
 
 
@@ -82,26 +83,27 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         // load first 32 bits of CK into A[1]..A[8]
         // load last  32 bits of CK into B[1]..B[8]
         // all other regs = 0
-        ctx->A[0] = ctx->cw[0] >> 4;
-        ctx->A[1] = ctx->cw[0] & 0xf;
-        ctx->A[2] = ctx->cw[1] >> 4;
-        ctx->A[3] = ctx->cw[1] & 0xf;
-        ctx->A[4] = ctx->cw[2] >> 4;
-        ctx->A[5] = ctx->cw[2] & 0xf;
-        ctx->A[6] = ctx->cw[3] >> 4;
-        ctx->A[7] = ctx->cw[3] & 0xf;
-        ctx->A[8] = 0;
-        ctx->A[9] = 0;
-        ctx->B[0] = ctx->cw[4] >> 4;
-        ctx->B[1] = ctx->cw[4] & 0xf;
-        ctx->B[2] = ctx->cw[5] >> 4;
-        ctx->B[3] = ctx->cw[5] & 0xf;
-        ctx->B[4] = ctx->cw[6] >> 4;
-        ctx->B[5] = ctx->cw[6] & 0xf;
-        ctx->B[6] = ctx->cw[7] >> 4;
-        ctx->B[7] = ctx->cw[7] & 0xf;
-        ctx->B[8] = 0;
-        ctx->B[9] = 0;
+        ctx->A[32 + 0] = ctx->cw[0] >> 4;
+        ctx->A[32 + 1] = ctx->cw[0] & 0xf;
+        ctx->A[32 + 2] = ctx->cw[1] >> 4;
+        ctx->A[32 + 3] = ctx->cw[1] & 0xf;
+        ctx->A[32 + 4] = ctx->cw[2] >> 4;
+        ctx->A[32 + 5] = ctx->cw[2] & 0xf;
+        ctx->A[32 + 6] = ctx->cw[3] >> 4;
+        ctx->A[32 + 7] = ctx->cw[3] & 0xf;
+        ctx->A[32 + 8] = 0;
+        ctx->A[32 + 9] = 0;
+
+        ctx->B[32 + 0] = ctx->cw[4] >> 4;
+        ctx->B[32 + 1] = ctx->cw[4] & 0xf;
+        ctx->B[32 + 2] = ctx->cw[5] >> 4;
+        ctx->B[32 + 3] = ctx->cw[5] & 0xf;
+        ctx->B[32 + 4] = ctx->cw[6] >> 4;
+        ctx->B[32 + 5] = ctx->cw[6] & 0xf;
+        ctx->B[32 + 6] = ctx->cw[7] >> 4;
+        ctx->B[32 + 7] = ctx->cw[7] & 0xf;
+        ctx->B[32 + 8] = 0;
+        ctx->B[32 + 9] = 0;
 
         ctx->X = 0;
         ctx->Y = 0;
@@ -126,38 +128,37 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         // 2 bits per iteration
         for(j=0; j<4; j++)
         {
+            iT = 31 - (i * 4 + j);
             // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[ (((ctx->A[3]>>0)&1)<<4) | (((ctx->A[0]>>2)&1)<<3) | (((ctx->A[5]>>1)&1)<<2) | (((ctx->A[6]>>3)&1)<<1) | (((ctx->A[8]>>0)&1)<<0) ];
-            s2 = sbox2[ (((ctx->A[1]>>1)&1)<<4) | (((ctx->A[2]>>2)&1)<<3) | (((ctx->A[5]>>3)&1)<<2) | (((ctx->A[6]>>0)&1)<<1) | (((ctx->A[8]>>1)&1)<<0) ];
-            s3 = sbox3[ (((ctx->A[0]>>3)&1)<<4) | (((ctx->A[1]>>0)&1)<<3) | (((ctx->A[4]>>1)&1)<<2) | (((ctx->A[4]>>3)&1)<<1) | (((ctx->A[5]>>2)&1)<<0) ];
-            s4 = sbox4[ (((ctx->A[2]>>3)&1)<<4) | (((ctx->A[0]>>1)&1)<<3) | (((ctx->A[1]>>3)&1)<<2) | (((ctx->A[3]>>2)&1)<<1) | (((ctx->A[7]>>0)&1)<<0) ];
-            s5 = sbox5[ (((ctx->A[4]>>2)&1)<<4) | (((ctx->A[3]>>3)&1)<<3) | (((ctx->A[5]>>0)&1)<<2) | (((ctx->A[7]>>1)&1)<<1) | (((ctx->A[8]>>2)&1)<<0) ];
-            s6 = sbox6[ (((ctx->A[2]>>1)&1)<<4) | (((ctx->A[3]>>1)&1)<<3) | (((ctx->A[4]>>0)&1)<<2) | (((ctx->A[6]>>2)&1)<<1) | (((ctx->A[8]>>3)&1)<<0) ];
-            s7 = sbox7[ (((ctx->A[1]>>2)&1)<<4) | (((ctx->A[2]>>0)&1)<<3) | (((ctx->A[6]>>1)&1)<<2) | (((ctx->A[7]>>2)&1)<<1) | (((ctx->A[7]>>3)&1)<<0) ];
+            s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 0) & 1) << 0) ];
+            s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 1) & 1) << 0) ];
+            s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | (((ctx->A[iT + 1 + 5] >> 2) & 1) << 0) ];
+            s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 7] >> 0) & 1) << 0) ];
+            s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 2) & 1) << 0) ];
+            s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 8] >> 3) & 1) << 0) ];
+            s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | (((ctx->A[iT + 1 + 7] >> 3) & 1) << 0) ];
 
             // use 4x4 xor to produce extra nibble for T3
-            extra_B = ( ((ctx->B[2]&1)<<3) ^ ((ctx->B[5]&2)<<2) ^ ((ctx->B[6]&4)<<1) ^ ((ctx->B[8]&8)>>0) ) |
-                      ( ((ctx->B[5]&1)<<2) ^ ((ctx->B[7]&2)<<1) ^ ((ctx->B[2]&8)>>1) ^ ((ctx->B[3]&4)>>0) ) |
-                      ( ((ctx->B[4]&8)>>2) ^ ((ctx->B[7]&4)>>1) ^ ((ctx->B[3]&1)<<1) ^ ((ctx->B[4]&2)>>0) ) |
-                      ( ((ctx->B[8]&4)>>2) ^ ((ctx->B[5]&8)>>3) ^ ((ctx->B[2]&2)>>1) ^ ((ctx->B[7]&1)>>0) ) ;
-
+            extra_B = ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ ((ctx->B[iT + 1 + 8] & 8) >> 0) ) |
+                      ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ ((ctx->B[iT + 1 + 3] & 4) >> 0) ) |
+                      ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ ((ctx->B[iT + 1 + 4] & 2) >> 0) ) |
+                      ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ ((ctx->B[iT + 1 + 7] & 1) >> 0) ) ;
 
 
             // T1 = xor all inputs
             // in1,in2, D are only used in T1 during initialisation, not generation
-            next_A1 = ctx->A[9] ^ ctx->X;
-            if (init) next_A1 = next_A1 ^ ctx->D ^ ((j % 2) ? in2 : in1);
+            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ ctx->X;
+            if (init) ctx->A[iT] ^= ctx->D ^ ((j % 2) ? in2 : in1);
 
 
             // T2 =  xor all inputs
             // in1,in2 are only used in T1 during initialisation, not generation
             // if p=0, use this, if p=1, rotate the result left
-            next_B1 = ctx->B[6] ^ ctx->B[9] ^ ctx->Y;
-            if (init) next_B1 = next_B1 ^ ((j % 2) ? in1 : in2);
-
+            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ ctx->Y;
+            if (init) ctx->B[iT] ^= ((j % 2) ? in1 : in2);
             // if p=1, rotate left
-            if (ctx->p) next_B1 = ( (next_B1 << 1) | ((next_B1 >> 3) & 1) ) & 0xf;
+            if (ctx->p) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
 
 
             // T3 = xor all inputs
@@ -179,42 +180,24 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             }
             ctx->E = next_E;
 
-
-            ctx->A[9] = ctx->A[8];
-            ctx->A[8] = ctx->A[7];
-            ctx->A[7] = ctx->A[6];
-            ctx->A[6] = ctx->A[5];
-            ctx->A[5] = ctx->A[4];
-            ctx->A[4] = ctx->A[3];
-            ctx->A[3] = ctx->A[2];
-            ctx->A[2] = ctx->A[1];
-            ctx->A[1] = ctx->A[0];
-            ctx->A[0]= next_A1;
-
-            ctx->B[9] = ctx->B[8];
-            ctx->B[8] = ctx->B[7];
-            ctx->B[7] = ctx->B[6];
-            ctx->B[6] = ctx->B[5];
-            ctx->B[5] = ctx->B[4];
-            ctx->B[4] = ctx->B[3];
-            ctx->B[3] = ctx->B[2];
-            ctx->B[2] = ctx->B[1];
-            ctx->B[1] = ctx->B[0];
-            ctx->B[0] = next_B1;
-
-            ctx->X = ((s4&1)<<3) | ((s3&1)<<2) | (s2&2) | ((s1&2)>>1);
-            ctx->Y = ((s6&1)<<3) | ((s5&1)<<2) | (s4&2) | ((s3&2)>>1);
-            ctx->Z = ((s2&1)<<3) | ((s1&1)<<2) | (s6&2) | ((s5&2)>>1);
-            ctx->p = (s7&2)>>1;
-            ctx->q = (s7&1);
+            ctx->X = ((s4 & 1) << 3) | ((s3 & 1) << 2) | (s2 & 2) | ((s1 & 2) >> 1);
+            ctx->Y = ((s6 & 1) << 3) | ((s5 & 1) << 2) | (s4 & 2) | ((s3 & 2) >> 1);
+            ctx->Z = ((s2 & 1) << 3) | ((s1 & 1) << 2) | (s6 & 2) | ((s5 & 2) >> 1);
+            ctx->p = (s7 & 2) >> 1;
+            ctx->q = (s7 & 1);
 
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
             // xor 2 by 2
-            op = (op << 2)^ ( (((ctx->D^(ctx->D>>1))>>1)&2) | ((ctx->D^(ctx->D>>1))&1) );
+            op = (op << 2) ^ ( (((ctx->D ^ (ctx->D >> 1)) >> 1) & 2) | ((ctx->D ^ (ctx->D >> 1)) & 1) );
         }
         // return input data during init
         cb[i] = (init) ? sb[i] : op;
+    }
+
+    for(i=0; i<10; i++) {
+        ctx->A[32 + i] = ctx->A[i];
+        ctx->B[32 + i] = ctx->B[i];
     }
 }
 
