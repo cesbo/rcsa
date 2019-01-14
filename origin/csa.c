@@ -56,7 +56,13 @@ typedef struct {
     uint8_t F;
     uint8_t r;
 
-    uint8_t S[8];
+    uint8_t s1;
+    uint8_t s2;
+    uint8_t s3;
+    uint8_t s4;
+    uint8_t s5;
+    uint8_t s6;
+    uint8_t s7;
 } csa_ctx_t;
 
 void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
@@ -103,14 +109,13 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->F = 0;
         ctx->r = 0;
 
-        ctx->S[0] = 0;
-        ctx->S[1] = 0;
-        ctx->S[2] = 0;
-        ctx->S[3] = 0;
-        ctx->S[4] = 0;
-        ctx->S[5] = 0;
-        ctx->S[6] = 0;
-        ctx->S[7] = 0;
+        ctx->s1 = 0;
+        ctx->s2 = 0;
+        ctx->s3 = 0;
+        ctx->s4 = 0;
+        ctx->s5 = 0;
+        ctx->s6 = 0;
+        ctx->s7 = 0;
     }
 
     // 8 bytes per operation
@@ -129,17 +134,17 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
             // T1 = xor all inputs
             ctx->A[iT] = ctx->A[iT + 1 + 9] ^
-                (((ctx->S[4] & 1) << 3) | ((ctx->S[3] & 1) << 2) | (ctx->S[2] & 2) | ((ctx->S[1] & 2) >> 1));
+                (((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1));
             // T2 =  xor all inputs
             ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^
-                (((ctx->S[6] & 1) << 3) | ((ctx->S[5] & 1) << 2) | (ctx->S[4] & 2) | ((ctx->S[3] & 2) >> 1));
+                (((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1));
 
             if (init) {
                 ctx->A[iT] ^= ((j % 2) ? in2 : in1) ^ ctx->D;
                 ctx->B[iT] ^= ((j % 2) ? in1 : in2);
             }
 
-            Z = (((ctx->S[2] & 1) << 3) | ((ctx->S[1] & 1) << 2) | (ctx->S[6] & 2) | ((ctx->S[5] & 2) >> 1));
+            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
@@ -152,7 +157,7 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
             // T4 = sum, carry of Z + E + r
             next_E = (ctx->F & 0x0F);
-            if (ctx->S[7] & 1)
+            if (ctx->s7 & 1)
             {
                 ctx->F = ctx->E + Z + ctx->r;
                 ctx->r = (ctx->F >> 4) & 1;
@@ -164,17 +169,17 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             ctx->E = next_E;
 
             // if p=1, rotate left
-            if (ctx->S[7] & 2) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
+            if (ctx->s7 & 2) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
 
             // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            ctx->S[1] = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
-            ctx->S[2] = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
-            ctx->S[3] = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
-            ctx->S[4] = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
-            ctx->S[5] = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
-            ctx->S[6] = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
-            ctx->S[7] = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
+            ctx->s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
+            ctx->s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
+            ctx->s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
+            ctx->s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
+            ctx->s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
+            ctx->s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
+            ctx->s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
 
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
