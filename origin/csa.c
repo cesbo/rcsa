@@ -65,67 +65,59 @@ typedef struct {
     uint8_t s7;
 } csa_ctx_t;
 
-void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
+void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
-    int i,j;
+    int i,j,iT;
     uint8_t in1;        // most  significant nibble of input byte
     uint8_t in2;        // least significant nibble of input byte
     uint8_t op;
     uint8_t Z;
     uint8_t next_E;
 
-    int iT;
+    // load first 32 bits of CK into A[0]..A[7]
+    // load last  32 bits of CK into B[0]..B[7]
+    // all other regs = 0
+    ctx->A[32 + 0] = ctx->cw[0] >> 4;
+    ctx->A[32 + 1] = ctx->cw[0] & 0xf;
+    ctx->A[32 + 2] = ctx->cw[1] >> 4;
+    ctx->A[32 + 3] = ctx->cw[1] & 0xf;
+    ctx->A[32 + 4] = ctx->cw[2] >> 4;
+    ctx->A[32 + 5] = ctx->cw[2] & 0xf;
+    ctx->A[32 + 6] = ctx->cw[3] >> 4;
+    ctx->A[32 + 7] = ctx->cw[3] & 0xf;
+    ctx->A[32 + 8] = 0;
+    ctx->A[32 + 9] = 0;
 
-    // reset
-    if (init)
-    {
-        // load first 32 bits of CK into A[0]..A[7]
-        // load last  32 bits of CK into B[0]..B[7]
-        // all other regs = 0
-        ctx->A[32 + 0] = ctx->cw[0] >> 4;
-        ctx->A[32 + 1] = ctx->cw[0] & 0xf;
-        ctx->A[32 + 2] = ctx->cw[1] >> 4;
-        ctx->A[32 + 3] = ctx->cw[1] & 0xf;
-        ctx->A[32 + 4] = ctx->cw[2] >> 4;
-        ctx->A[32 + 5] = ctx->cw[2] & 0xf;
-        ctx->A[32 + 6] = ctx->cw[3] >> 4;
-        ctx->A[32 + 7] = ctx->cw[3] & 0xf;
-        ctx->A[32 + 8] = 0;
-        ctx->A[32 + 9] = 0;
+    ctx->B[32 + 0] = ctx->cw[4] >> 4;
+    ctx->B[32 + 1] = ctx->cw[4] & 0xf;
+    ctx->B[32 + 2] = ctx->cw[5] >> 4;
+    ctx->B[32 + 3] = ctx->cw[5] & 0xf;
+    ctx->B[32 + 4] = ctx->cw[6] >> 4;
+    ctx->B[32 + 5] = ctx->cw[6] & 0xf;
+    ctx->B[32 + 6] = ctx->cw[7] >> 4;
+    ctx->B[32 + 7] = ctx->cw[7] & 0xf;
+    ctx->B[32 + 8] = 0;
+    ctx->B[32 + 9] = 0;
 
-        ctx->B[32 + 0] = ctx->cw[4] >> 4;
-        ctx->B[32 + 1] = ctx->cw[4] & 0xf;
-        ctx->B[32 + 2] = ctx->cw[5] >> 4;
-        ctx->B[32 + 3] = ctx->cw[5] & 0xf;
-        ctx->B[32 + 4] = ctx->cw[6] >> 4;
-        ctx->B[32 + 5] = ctx->cw[6] & 0xf;
-        ctx->B[32 + 6] = ctx->cw[7] >> 4;
-        ctx->B[32 + 7] = ctx->cw[7] & 0xf;
-        ctx->B[32 + 8] = 0;
-        ctx->B[32 + 9] = 0;
+    ctx->D = 0;
+    ctx->E = 0;
+    ctx->F = 0;
+    ctx->r = 0;
 
-        ctx->D = 0;
-        ctx->E = 0;
-        ctx->F = 0;
-        ctx->r = 0;
-
-        ctx->s1 = 0;
-        ctx->s2 = 0;
-        ctx->s3 = 0;
-        ctx->s4 = 0;
-        ctx->s5 = 0;
-        ctx->s6 = 0;
-        ctx->s7 = 0;
-    }
+    ctx->s1 = 0;
+    ctx->s2 = 0;
+    ctx->s3 = 0;
+    ctx->s4 = 0;
+    ctx->s5 = 0;
+    ctx->s6 = 0;
+    ctx->s7 = 0;
 
     // 8 bytes per operation
     for(i=0; i<8; i++)
     {
-        if (init)
-        {
-            in1 = sb[i] >> 4;
-            in2 = sb[i] & 0xf;
-        }
+        in1 = sb[i] >> 4;
+        in2 = sb[i] & 0xf;
+
         op = 0;
         // 2 bits per iteration
         for(j=0; j<4; j++)
@@ -133,21 +125,15 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             iT = 31 - (i * 4 + j);
 
             // T1 = xor all inputs
-            ctx->A[iT] = ctx->A[iT + 1 + 9] ^
-                (((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1));
+            Z = ((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1);
+            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z ^ ((j % 2) ? in2 : in1) ^ ctx->D;
             // T2 =  xor all inputs
-            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^
-                (((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1));
-
-            if (init) {
-                ctx->A[iT] ^= ((j % 2) ? in2 : in1) ^ ctx->D;
-                ctx->B[iT] ^= ((j % 2) ? in1 : in2);
-            }
-
-            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
+            Z = ((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1);
+            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z ^ ((j % 2) ? in1 : in2);
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
+            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
             ctx->D = ctx->E ^ Z ^ (
                 ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
                 ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
@@ -187,7 +173,85 @@ void stream_cypher(int init, csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             op = (op << 2) ^ ( (((ctx->D ^ (ctx->D >> 1)) >> 1) & 2) | ((ctx->D ^ (ctx->D >> 1)) & 1) );
         }
         // return input data during init
-        cb[i] = (init) ? sb[i] : op;
+        cb[i] = sb[i];
+    }
+
+    for(i=0; i<10; i++) {
+        ctx->A[32 + i] = ctx->A[i];
+        ctx->B[32 + i] = ctx->B[i];
+    }
+}
+
+void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
+{
+    int i,j;
+    uint8_t in1;        // most  significant nibble of input byte
+    uint8_t in2;        // least significant nibble of input byte
+    uint8_t op;
+    uint8_t Z;
+    uint8_t next_E;
+
+    int iT;
+
+    // 8 bytes per operation
+    for(i=0; i<8; i++)
+    {
+        op = 0;
+        // 2 bits per iteration
+        for(j=0; j<4; j++)
+        {
+            iT = 31 - (i * 4 + j);
+
+            // T1 = xor all inputs
+            Z = ((ctx->s4 & 1) << 3) | ((ctx->s3 & 1) << 2) | (ctx->s2 & 2) | ((ctx->s1 & 2) >> 1);
+            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z;
+            // T2 =  xor all inputs
+            Z = ((ctx->s6 & 1) << 3) | ((ctx->s5 & 1) << 2) | (ctx->s4 & 2) | ((ctx->s3 & 2) >> 1);
+            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z;
+
+            // T3 = xor all inputs
+            // use 4x4 xor to produce extra nibble for T3
+            Z = (((ctx->s2 & 1) << 3) | ((ctx->s1 & 1) << 2) | (ctx->s6 & 2) | ((ctx->s5 & 2) >> 1));
+            ctx->D = ctx->E ^ Z ^ (
+                ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
+                ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
+                ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ (ctx->B[iT + 1 + 4] & 2) ) |
+                ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) );
+
+
+            // T4 = sum, carry of Z + E + r
+            next_E = (ctx->F & 0x0F);
+            if (ctx->s7 & 1)
+            {
+                ctx->F = ctx->E + Z + ctx->r;
+                ctx->r = (ctx->F >> 4) & 1;
+            }
+            else
+            {
+                ctx->F = ctx->E;
+            }
+            ctx->E = next_E;
+
+            // if p=1, rotate left
+            if (ctx->s7 & 2) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
+
+            // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
+            // 5 bits input per s-box, 2 bits output per s-box
+            ctx->s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
+            ctx->s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
+            ctx->s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
+            ctx->s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
+            ctx->s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
+            ctx->s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
+            ctx->s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
+
+            // require 4 loops per output byte
+            // 2 output bits are a function of the 4 bits of D
+            // xor 2 by 2
+            op = (op << 2) ^ ( (((ctx->D ^ (ctx->D >> 1)) >> 1) & 2) | ((ctx->D ^ (ctx->D >> 1)) & 1) );
+        }
+        // return input data during init
+        cb[i] = op;
     }
 
     for(i=0; i<10; i++) {
@@ -476,48 +540,33 @@ unsigned char expected_kk1[] = {
 
 #define N 23 // assume TS packets, 184/8
 
-void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted, unsigned char *expected)
+void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
 {
     int i,j;
     unsigned char stream[8];
     unsigned char ib[8];
     unsigned char block[8];
-    int fail;
 
     // 1st 4 bytes not encrypted
-    for(i=0; i<4; i++)
-        decrypted[i] = encrypted[i];
+    for(i=0; i<4; i++) decrypted[i] = encrypted[i];
 
     // 1st 8 bytes of initialisation
-    stream_cypher(1, ctx, &encrypted[4], ib);
+    stream_init(ctx, &encrypted[4], ib);
 
-    for(j=1; j<(N+1); j++)
+    for(j=1; j<N; j++)
     {
         block_decypher(ctx, ib, block);
-
-        if (j != N)
-        {
-            stream_cypher(0, ctx, NULL, stream);
-
-            // xor sb x stream
-            for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
-        }
-        else
-        {
-            // last block - sb[N+1] = IV(initialisation vetor)(=0)
-            for(i=0; i<8; i++)  ib[i] = 0;
-        }
-
+        stream_cypher(ctx, stream);
+        // xor sb x stream
+        for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
         // xor ib x block
         for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
     }
 
-    fail = 0;
-    for(i=4; i<188; i++)
-    {
-        if (decrypted[i] != expected[i]) fail = 1;
-    }
-    printf("decryption %s\n",(fail) ? "failed" : "passed");
+    // last block - sb[N+1] = IV(initialisation vetor)(=0)
+    block_decypher(ctx, ib, block);
+    for(i=0; i<8; i++)  ib[i] = 0;
+    for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
 }
 
 /*
@@ -527,18 +576,15 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted,
         the go forwards
         xor the ib[2..N] with the stream cypher to give the encrypted data, sb[2..N]
 */
-void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted, unsigned char *expected)
+void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted)
 {
     int i,j;
     unsigned char stream[8];
     unsigned char ib[N+2][8];   // since we'll use 1..N and N+1 for IV
     unsigned char block[8];
-    int fail;
 
     // 1st 4 bytes not encrypted
-    for(i=0; i<4; i++)
-        encrypted[i] = decrypted[i];
-
+    for(i=0; i<4; i++) encrypted[i] = decrypted[i];
 
     // ignore residue for now
 
@@ -559,62 +605,38 @@ void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted,
 
 
     // 1st 8 bytes of initialisation - ib[1] has popped out of the last block cypher ...
-    stream_cypher(1, ctx, ib[1], stream);
+    stream_init(ctx, ib[1], stream);
 
     // sb[1] is just ib[1];
     for(i=0; i<8; i++)  encrypted[4+0+i] = ib[1][i];
 
-    for(j=2; j<(N+1); j++)
+    for(j=2; j<=N; j++)
     {
-        stream_cypher(0, ctx, ib[j], stream);
+        stream_cypher(ctx, stream);
         // xor ib x stream
         for(i=0; i<8; i++)  encrypted[4+8*(j-1)+i] = ib[j][i] ^ stream[i];
     }
-
-    fail = 0;
-    for(i=4; i<188; i++)
-    {
-        if (encrypted[i] != expected[i]) fail = 1;
-    }
-    printf("encryption %s\n",(fail) ? "failed" : "passed");
 }
 
 void bench(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
 {
-    int z,i,j;
-    unsigned char stream[8];
-    unsigned char ib[8];
-    unsigned char block[8];
+    int z;
 
     for(z=0; z<TS_PKTS_FOR_TEST; z++) {
-        // 1st 4 bytes not encrypted
-        for(i=0; i<4; i++)
-            decrypted[i] = encrypted[i];
+        decrypt(ctx, encrypted1, decrypted1);
+    }
+}
 
-        // 1st 8 bytes of initialisation
-        stream_cypher(1, ctx, &encrypted[4], ib);
-
-        for(j=1; j<(N+1); j++)
-        {
-            block_decypher(ctx, ib, block);
-
-            if (j != N)
-            {
-                stream_cypher(0, ctx, NULL, stream);
-
-                // xor sb x stream
-                for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
-            }
-            else
-            {
-                // last block - sb[N+1] = IV(initialisation vetor)(=0)
-                for(i=0; i<8; i++)  ib[i] = 0;
-            }
-
-            // xor ib x block
-            for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
+void compare(const char *name, const uint8_t *b1, const uint8_t *b2)
+{
+    int i,fail = 0;
+    for(i=4; i<188; i++) {
+        if (b1[i] != b2[i]) {
+            fail = 1;
+            break;
         }
     }
+    printf("%s %s\n", name, (fail) ? "failed" : "passed");
 }
 
 int main(void)
@@ -622,15 +644,15 @@ int main(void)
     csa_ctx_t ctx;
     key_schedule(&ctx, key1);
 
-    decrypt(&ctx, encrypted1, decrypted1, expected1);
-    // encrypt(&ctx, expected1, decrypted1, encrypted1);
+    decrypt(&ctx, encrypted1, decrypted1); compare("decryption", decrypted1, expected1);
+    encrypt(&ctx, expected1, decrypted1); compare("encryption", decrypted1, encrypted1);
 
-    // struct timeval tvs, tve;
-    // gettimeofday(&tvs,NULL);
-    // bench(&ctx, encrypted1, decrypted1);
-    // gettimeofday(&tve,NULL);
-    // fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
-    // fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+    struct timeval tvs, tve;
+    gettimeofday(&tvs,NULL);
+    bench(&ctx, encrypted1, decrypted1);
+    gettimeofday(&tve,NULL);
+    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
 
     return 0;
 }
