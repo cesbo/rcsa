@@ -66,14 +66,15 @@ typedef struct {
     uint8_t s7;
 } csa_ctx_t;
 
-#define XOR_INPUTS(i1,i2,i3,i4) ( ((i1 & 1) << 3) | ((i2 & 1) << 2) | (i3 & 2) | ((i4 & 2) >> 1) )
+#define BIT_IF(COND, TRUE, FALSE) ( (FALSE) ^ ( ((COND) * 0xFF) & (FALSE ^ TRUE)) )
+#define XOR_INPUTS(I1,I2,I3,I4) ( ((I1 & 1) << 3) | ((I2 & 1) << 2) | (I3 & 2) | ((I4 & 2) >> 1) )
+#define ROTATE_4(V) ( ((N << 1) | ((N >> 3) & 1)) & 0x0F )
 
 static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j,iT=32;
     uint8_t in[2]; // most+least significant nibble of input byte
-    uint8_t Z;
-    uint8_t next_E;
+    uint8_t Z,N;
 
     // load first 32 bits of CK into A[0]..A[7]
     // load last  32 bits of CK into B[0]..B[7]
@@ -125,16 +126,19 @@ static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
                 ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) );
 
             // T4 = sum, carry of Z + E + r
-            next_E = ctx->F & 0x0F;
+            N = ctx->F & 0x0F;
             Z += ctx->E + ctx->r;
             // ctx->F = (ctx->s7 & 1) ? Z : ctx->E
-            ctx->F = ctx->E ^ ( ((ctx->s7 & 1) * 0x1F) & (ctx->E ^ Z) );
+            ctx->F = BIT_IF(ctx->s7 & 1, Z, ctx->E);
             // ctx->r = (ctx->s7 & 1) ? ((ctx->F >> 4) & 1) : ctx->r;
-            ctx->r = ctx->r ^ ( (ctx->s7 & 1) & (ctx->r ^ ((ctx->F >> 4) & 1)));
-            ctx->E = next_E;
+            ctx->r = BIT_IF(ctx->s7 & 1, (ctx->F >> 4) & 1, ctx->r);
+            ctx->E = N;
 
             // if p=1, rotate left
-            if (ctx->s7 & 2) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
+            N = ctx->B[iT];
+            Z = ROTATE_4(N);
+            // ctx->B[iT] = (ctx->s7 & 2) ? Z : N
+            ctx->B[iT] = BIT_IF((ctx->s7 >> 1) & 1, Z, N);
 
             // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
@@ -161,8 +165,7 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
 {
     int i,j,iT=32;
     uint8_t op;
-    uint8_t Z;
-    uint8_t next_E;
+    uint8_t Z,N;
 
     // 8 bytes per operation
     for(i=0; i<8; i++)
@@ -191,16 +194,19 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
                 ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) );
 
             // T4 = sum, carry of Z + E + r
-            next_E = ctx->F & 0x0F;
+            N = ctx->F & 0x0F;
             Z += ctx->E + ctx->r;
             // ctx->F = (ctx->s7 & 1) ? Z : ctx->E
-            ctx->F = ctx->E ^ ( ((ctx->s7 & 1) * 0x1F) & (ctx->E ^ Z) );
+            ctx->F = BIT_IF(ctx->s7 & 1, Z, ctx->E);
             // ctx->r = (ctx->s7 & 1) ? ((ctx->F >> 4) & 1) : ctx->r;
-            ctx->r = ctx->r ^ ( (ctx->s7 & 1) & (ctx->r ^ ((ctx->F >> 4) & 1)));
-            ctx->E = next_E;
+            ctx->r = BIT_IF(ctx->s7 & 1, (ctx->F >> 4) & 1, ctx->r);
+            ctx->E = N;
 
             // if p=1, rotate left
-            if (ctx->s7 & 2) ctx->B[iT] = ( (ctx->B[iT] << 1) | ((ctx->B[iT] >> 3) & 1) ) & 0xf;
+            N = ctx->B[iT];
+            Z = ROTATE_4(N);
+            // ctx->B[iT] = (ctx->s7 & 2) ? Z : N
+            ctx->B[iT] = BIT_IF((ctx->s7 >> 1) & 1, Z, N);
 
             // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
@@ -511,7 +517,7 @@ unsigned char expected_kk1[] = {
     0xd9, 0x55, 0x91, 0xcf, 0xe0, 0xc9, 0xdf, 0x88,
 };
 
-#define N 23 // assume TS packets, 184/8
+#define STEPS (188 >> 3)
 
 void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
 {
@@ -526,7 +532,7 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
     // 1st 8 bytes of initialisation
     stream_init(ctx, &encrypted[4], ib);
 
-    for(j=1; j<N; j++)
+    for(j=1; j<STEPS; j++)
     {
         block_decypher(ctx, ib, block);
         stream_cypher(ctx, stream);
@@ -553,7 +559,7 @@ void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted)
 {
     int i,j;
     unsigned char stream[8];
-    unsigned char ib[N+2][8];   // since we'll use 1..N and N+1 for IV
+    unsigned char ib[STEPS+2][8];   // since we'll use 1..N and N+1 for IV
     unsigned char block[8];
 
     // 1st 4 bytes not encrypted
@@ -563,9 +569,9 @@ void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted)
 
     // last word
     // IV is really ib[n+1] = 0
-    for(i=0; i<8; i++) ib[N+1][i] = 0;
+    for(i=0; i<8; i++) ib[STEPS+1][i] = 0;
 
-    for (j=N; j>0; j--)
+    for (j=STEPS; j>0; j--)
     {
         // xor db x ib[n][j]
         for(i=0; i<8; i++)  block[i] = decrypted[4+(j*8)-8+i] ^ ib[j+1][i];
@@ -583,7 +589,7 @@ void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted)
     // sb[1] is just ib[1];
     for(i=0; i<8; i++)  encrypted[4+0+i] = ib[1][i];
 
-    for(j=2; j<=N; j++)
+    for(j=2; j<=STEPS; j++)
     {
         stream_cypher(ctx, stream);
         // xor ib x stream
