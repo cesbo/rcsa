@@ -66,9 +66,18 @@ typedef struct {
     uint8_t s7;
 } csa_ctx_t;
 
-#define BIT_IF(COND, TRUE, FALSE) ( (FALSE) ^ ( ((COND) * 0xFF) & (FALSE ^ TRUE)) )
-#define XOR_INPUTS(I1,I2,I3,I4) ( ((I1 & 1) << 3) | ((I2 & 1) << 2) | (I3 & 2) | ((I4 & 2) >> 1) )
-#define ROTATE_4(V) ( ((N << 1) | ((N >> 3) & 1)) & 0x0F )
+#define AND(V1, V2) ((V1) & (V2))
+#define XOR(V1, V2) ((V1) ^ (V2))
+#define OR(V1, V2) ((V1) | (V2))
+
+#define BIT_LSH(V, S) (((V) & 1) << S)
+
+#define B_GROUP(S, V1, V2, V3, V4) XOR(BIT_LSH(V1, S), XOR(BIT_LSH(V2, S), XOR(BIT_LSH(V3, S), V4)))
+#define A_GROUP(V1, V2, V3, V4, V5) OR(BIT_LSH(V1, 4), OR(BIT_LSH(V2, 3), OR(BIT_LSH(V3, 2), OR(BIT_LSH(V4, 1), (V5) & 1))))
+#define S_GROUP(V1, V2, V3, V4) OR(BIT_LSH(V1, 3), OR(BIT_LSH(V2, 2), OR((V3) & 2, ((V4) & 2) >> 1)))
+
+#define BIT_IF(COND_MASK, TRUE, FALSE) XOR(FALSE, AND(COND_MASK, XOR(FALSE, TRUE)))
+#define ROTATE_4(V) AND(OR(N << 1, (N >> 3) & 1), 0x0F)
 
 static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
@@ -106,49 +115,49 @@ static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         // 2 bits per iteration
         for(j=0; j<4; j++)
         {
-            iT -= 1;
-
             // T1 = xor all inputs
-            Z = XOR_INPUTS(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
-            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z ^ in[(j & 1)] ^ ctx->D;
+            Z = S_GROUP(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
+            ctx->A[iT - 1] = XOR(ctx->A[iT + 9], XOR(Z, XOR(in[(j & 1)], ctx->D)));
 
             // T2 =  xor all inputs
-            Z = XOR_INPUTS(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
-            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z ^ in[(j & 1) ^ 1];
+            Z = S_GROUP(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
+            ctx->B[iT - 1] = XOR(ctx->B[iT + 6], XOR(ctx->B[iT + 9], XOR(Z, in[(j & 1) ^ 1])));
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
-            Z = XOR_INPUTS(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
-            ctx->D = ctx->E ^ Z ^ (
-                ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
-                ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
-                ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ (ctx->B[iT + 1 + 4] & 2) ) |
-                ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) );
+            Z = S_GROUP(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
+            ctx->D = XOR(ctx->E, XOR(Z,
+                OR(B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] & 8),
+                OR(B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] & 4),
+                OR(B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] & 2),
+                   B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] & 1))))));
 
             // T4 = sum, carry of Z + E + r
-            N = ctx->F & 0x0F;
             Z += ctx->E + ctx->r;
-            // ctx->F = (ctx->s7 & 1) ? Z : ctx->E
-            ctx->F = BIT_IF(ctx->s7 & 1, Z, ctx->E);
-            // ctx->r = (ctx->s7 & 1) ? ((ctx->F >> 4) & 1) : ctx->r;
-            ctx->r = BIT_IF(ctx->s7 & 1, (ctx->F >> 4) & 1, ctx->r);
-            ctx->E = N;
+            // N = (ctx->s7 & 1) ? Z : ctx->E
+            N = BIT_IF((ctx->s7 & 1) * 0xFF, Z, ctx->E);
+            // ctx->r = (ctx->s7 & 1) ? ((N >> 4) & 1) : ctx->r;
+            ctx->r = BIT_IF(ctx->s7 & 1, (N >> 4) & 1, ctx->r);
+            ctx->E = ctx->F & 0x0F;
+            ctx->F = N;
 
             // if p=1, rotate left
-            N = ctx->B[iT];
+            N = ctx->B[iT - 1];
             Z = ROTATE_4(N);
             // ctx->B[iT] = (ctx->s7 & 2) ? Z : N
-            ctx->B[iT] = BIT_IF((ctx->s7 >> 1) & 1, Z, N);
+            ctx->B[iT - 1] = BIT_IF((ctx->s7 >> 1) * 0xFF, Z, N);
 
             // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            ctx->s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
-            ctx->s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
-            ctx->s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
-            ctx->s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
-            ctx->s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
-            ctx->s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
-            ctx->s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
+            ctx->s1 = sbox1[A_GROUP(ctx->A[iT + 3] >> 0, ctx->A[iT + 0] >> 2, ctx->A[iT + 5] >> 1, ctx->A[iT + 6] >> 3, ctx->A[iT + 8] >> 0)];
+            ctx->s2 = sbox2[A_GROUP(ctx->A[iT + 1] >> 1, ctx->A[iT + 2] >> 2, ctx->A[iT + 5] >> 3, ctx->A[iT + 6] >> 0, ctx->A[iT + 8] >> 1)];
+            ctx->s3 = sbox3[A_GROUP(ctx->A[iT + 0] >> 3, ctx->A[iT + 1] >> 0, ctx->A[iT + 4] >> 1, ctx->A[iT + 4] >> 3, ctx->A[iT + 5] >> 2)];
+            ctx->s4 = sbox4[A_GROUP(ctx->A[iT + 2] >> 3, ctx->A[iT + 0] >> 1, ctx->A[iT + 1] >> 3, ctx->A[iT + 3] >> 2, ctx->A[iT + 7] >> 0)];
+            ctx->s5 = sbox5[A_GROUP(ctx->A[iT + 4] >> 2, ctx->A[iT + 3] >> 3, ctx->A[iT + 5] >> 0, ctx->A[iT + 7] >> 1, ctx->A[iT + 8] >> 2)];
+            ctx->s6 = sbox6[A_GROUP(ctx->A[iT + 2] >> 1, ctx->A[iT + 3] >> 1, ctx->A[iT + 4] >> 0, ctx->A[iT + 6] >> 2, ctx->A[iT + 8] >> 3)];
+            ctx->s7 = sbox7[A_GROUP(ctx->A[iT + 1] >> 2, ctx->A[iT + 2] >> 0, ctx->A[iT + 6] >> 1, ctx->A[iT + 7] >> 2, ctx->A[iT + 7] >> 3)];
+
+            iT -= 1;
         }
 
         // return input data during init
@@ -175,53 +184,54 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
         // 2 bits per iteration
         for(j=0; j<4; j++)
         {
-            iT -= 1;
-
             // T1 = xor all inputs
-            Z = XOR_INPUTS(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
-            ctx->A[iT] = ctx->A[iT + 1 + 9] ^ Z;
+            Z = S_GROUP(ctx->s4, ctx->s3, ctx->s2, ctx->s1);
+            ctx->A[iT - 1] = XOR(ctx->A[iT + 9], Z);
             // T2 =  xor all inputs
-            Z = XOR_INPUTS(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
-            ctx->B[iT] = ctx->B[iT + 1 + 6] ^ ctx->B[iT + 1 + 9] ^ Z;
+            Z = S_GROUP(ctx->s6, ctx->s5, ctx->s4, ctx->s3);
+            ctx->B[iT - 1] = XOR(ctx->B[iT + 6], XOR(ctx->B[iT + 9], Z));
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
-            Z = XOR_INPUTS(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
-            ctx->D = ctx->E ^ Z ^ (
-                ( ((ctx->B[iT + 1 + 2] & 1) << 3) ^ ((ctx->B[iT + 1 + 5] & 2) << 2) ^ ((ctx->B[iT + 1 + 6] & 4) << 1) ^ (ctx->B[iT + 1 + 8] & 8) ) |
-                ( ((ctx->B[iT + 1 + 5] & 1) << 2) ^ ((ctx->B[iT + 1 + 7] & 2) << 1) ^ ((ctx->B[iT + 1 + 2] & 8) >> 1) ^ (ctx->B[iT + 1 + 3] & 4) ) |
-                ( ((ctx->B[iT + 1 + 4] & 8) >> 2) ^ ((ctx->B[iT + 1 + 7] & 4) >> 1) ^ ((ctx->B[iT + 1 + 3] & 1) << 1) ^ (ctx->B[iT + 1 + 4] & 2) ) |
-                ( ((ctx->B[iT + 1 + 8] & 4) >> 2) ^ ((ctx->B[iT + 1 + 5] & 8) >> 3) ^ ((ctx->B[iT + 1 + 2] & 2) >> 1) ^ (ctx->B[iT + 1 + 7] & 1) ) );
+            Z = S_GROUP(ctx->s2, ctx->s1, ctx->s6, ctx->s5);
+            ctx->D = XOR(ctx->E, XOR(Z,
+                OR(B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] & 8),
+                OR(B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] & 4),
+                OR(B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] & 2),
+                   B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] & 1))))));
 
             // T4 = sum, carry of Z + E + r
-            N = ctx->F & 0x0F;
             Z += ctx->E + ctx->r;
-            // ctx->F = (ctx->s7 & 1) ? Z : ctx->E
-            ctx->F = BIT_IF(ctx->s7 & 1, Z, ctx->E);
-            // ctx->r = (ctx->s7 & 1) ? ((ctx->F >> 4) & 1) : ctx->r;
-            ctx->r = BIT_IF(ctx->s7 & 1, (ctx->F >> 4) & 1, ctx->r);
-            ctx->E = N;
+            // N = (ctx->s7 & 1) ? Z : ctx->E
+            N = BIT_IF((ctx->s7 & 1) * 0xFF, Z, ctx->E);
+            // ctx->r = (ctx->s7 & 1) ? ((N >> 4) & 1) : ctx->r;
+            ctx->r = BIT_IF(ctx->s7 & 1, (N >> 4) & 1, ctx->r);
+            ctx->E = ctx->F & 0x0F;
+            ctx->F = N;
 
             // if p=1, rotate left
-            N = ctx->B[iT];
+            N = ctx->B[iT - 1];
             Z = ROTATE_4(N);
             // ctx->B[iT] = (ctx->s7 & 2) ? Z : N
-            ctx->B[iT] = BIT_IF((ctx->s7 >> 1) & 1, Z, N);
+            ctx->B[iT - 1] = BIT_IF((ctx->s7 >> 1) * 0xFF, Z, N);
 
             // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            ctx->s1 = sbox1[ (((ctx->A[iT + 1 + 3] >> 0) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 0) & 1) ];
-            ctx->s2 = sbox2[ (((ctx->A[iT + 1 + 1] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 2) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 0) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 1) & 1) ];
-            ctx->s3 = sbox3[ (((ctx->A[iT + 1 + 0] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 1] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 4] >> 3) & 1) << 1) | ((ctx->A[iT + 1 + 5] >> 2) & 1) ];
-            ctx->s4 = sbox4[ (((ctx->A[iT + 1 + 2] >> 3) & 1) << 4) | (((ctx->A[iT + 1 + 0] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 1] >> 3) & 1) << 2) | (((ctx->A[iT + 1 + 3] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 0) & 1) ];
-            ctx->s5 = sbox5[ (((ctx->A[iT + 1 + 4] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 3) & 1) << 3) | (((ctx->A[iT + 1 + 5] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 1) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 2) & 1) ];
-            ctx->s6 = sbox6[ (((ctx->A[iT + 1 + 2] >> 1) & 1) << 4) | (((ctx->A[iT + 1 + 3] >> 1) & 1) << 3) | (((ctx->A[iT + 1 + 4] >> 0) & 1) << 2) | (((ctx->A[iT + 1 + 6] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 8] >> 3) & 1) ];
-            ctx->s7 = sbox7[ (((ctx->A[iT + 1 + 1] >> 2) & 1) << 4) | (((ctx->A[iT + 1 + 2] >> 0) & 1) << 3) | (((ctx->A[iT + 1 + 6] >> 1) & 1) << 2) | (((ctx->A[iT + 1 + 7] >> 2) & 1) << 1) | ((ctx->A[iT + 1 + 7] >> 3) & 1) ];
+            ctx->s1 = sbox1[A_GROUP(ctx->A[iT + 3] >> 0, ctx->A[iT + 0] >> 2, ctx->A[iT + 5] >> 1, ctx->A[iT + 6] >> 3, ctx->A[iT + 8] >> 0)];
+            ctx->s2 = sbox2[A_GROUP(ctx->A[iT + 1] >> 1, ctx->A[iT + 2] >> 2, ctx->A[iT + 5] >> 3, ctx->A[iT + 6] >> 0, ctx->A[iT + 8] >> 1)];
+            ctx->s3 = sbox3[A_GROUP(ctx->A[iT + 0] >> 3, ctx->A[iT + 1] >> 0, ctx->A[iT + 4] >> 1, ctx->A[iT + 4] >> 3, ctx->A[iT + 5] >> 2)];
+            ctx->s4 = sbox4[A_GROUP(ctx->A[iT + 2] >> 3, ctx->A[iT + 0] >> 1, ctx->A[iT + 1] >> 3, ctx->A[iT + 3] >> 2, ctx->A[iT + 7] >> 0)];
+            ctx->s5 = sbox5[A_GROUP(ctx->A[iT + 4] >> 2, ctx->A[iT + 3] >> 3, ctx->A[iT + 5] >> 0, ctx->A[iT + 7] >> 1, ctx->A[iT + 8] >> 2)];
+            ctx->s6 = sbox6[A_GROUP(ctx->A[iT + 2] >> 1, ctx->A[iT + 3] >> 1, ctx->A[iT + 4] >> 0, ctx->A[iT + 6] >> 2, ctx->A[iT + 8] >> 3)];
+            ctx->s7 = sbox7[A_GROUP(ctx->A[iT + 1] >> 2, ctx->A[iT + 2] >> 0, ctx->A[iT + 6] >> 1, ctx->A[iT + 7] >> 2, ctx->A[iT + 7] >> 3)];
 
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
             // xor 2 by 2
-            op = (op << 2) ^ ( (((ctx->D ^ (ctx->D >> 1)) >> 1) & 2) | ((ctx->D ^ (ctx->D >> 1)) & 1) );
+            Z = XOR(ctx->D, ctx->D >> 1);
+            op = XOR(op << 2, OR((Z >> 1) & 2 , Z & 1));
+
+            iT -= 1;
         }
         // return input data during init
         cb[i] = op;
