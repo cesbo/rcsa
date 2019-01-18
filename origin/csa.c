@@ -43,10 +43,11 @@ int sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,
 int sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
 typedef struct {
-    uint8_t cw[8];
+    uint8_t ccw[16];
 
     // block cypher
     uint8_t kk[56];
+    uint8_t T[64];
 
     // stream cypher
     uint8_t A[42];
@@ -82,16 +83,8 @@ static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     uint8_t Z,N;
     uint8_t s1,s2,s3,s4,s5,s6,s7;
 
-    // load first 32 bits of CK into A[0]..A[7]
-    // load last  32 bits of CK into B[0]..B[7]
-    // all other regs = 0
-    for(i=0; i<4; i++) {
-        ctx->A[i * 2 + 32] = ctx->cw[i    ] >> 4;
-        ctx->A[i * 2 + 33] = ctx->cw[i    ] & 0x0F;
-        ctx->B[i * 2 + 32] = ctx->cw[i + 4] >> 4;
-        ctx->B[i * 2 + 33] = ctx->cw[i + 4] & 0x0F;
-    }
-
+    *(uint64_t *)&ctx->A[32] = *(uint64_t *)&ctx->ccw[0];
+    *(uint64_t *)&ctx->B[32] = *(uint64_t *)&ctx->ccw[8];
     *(uint16_t *)&ctx->A[40] = 0;
     *(uint16_t *)&ctx->B[40] = 0;
 
@@ -254,15 +247,15 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
 //block cypher
 
 // key preparation
-uint8_t key_perm[0x40] = {
-    0x12,0x24,0x09,0x07,0x2A,0x31,0x1D,0x15,0x1C,0x36,0x3E,0x32,0x13,0x21,0x3B,0x40,
-    0x18,0x14,0x25,0x27,0x02,0x35,0x1B,0x01,0x22,0x04,0x0D,0x0E,0x39,0x28,0x1A,0x29,
-    0x33,0x23,0x34,0x0C,0x16,0x30,0x1E,0x3A,0x2D,0x1F,0x08,0x19,0x17,0x2F,0x3D,0x11,
-    0x3C,0x05,0x38,0x2B,0x0B,0x06,0x0A,0x2C,0x20,0x3F,0x2E,0x0F,0x03,0x26,0x10,0x37,
+static uint8_t key_perm[0x40] = {
+    0x11,0x23,0x08,0x06,0x29,0x30,0x1C,0x14,0x1B,0x35,0x3D,0x31,0x12,0x20,0x3A,0x3F,
+    0x17,0x13,0x24,0x26,0x01,0x34,0x1A,0x00,0x21,0x03,0x0C,0x0D,0x38,0x27,0x19,0x28,
+    0x32,0x22,0x33,0x0B,0x15,0x2F,0x1D,0x39,0x2C,0x1E,0x07,0x18,0x16,0x2E,0x3C,0x10,
+    0x3B,0x04,0x37,0x2A,0x0A,0x05,0x09,0x2B,0x1F,0x3E,0x2D,0x0E,0x02,0x25,0x0F,0x36,
 };
 
 // block - sbox
-uint8_t block_sbox[0x100] = {
+static uint8_t block_sbox[0x100] = {
     0x3A,0xEA,0x68,0xFE,0x33,0xE9,0x88,0x1A,0x83,0xCF,0xE1,0x7F,0xBA,0xE2,0x38,0x12,
     0xE8,0x27,0x61,0x95,0x0C,0x36,0xE5,0x70,0xA2,0x06,0x82,0x7C,0x17,0xA3,0x26,0x49,
     0xBE,0x7A,0x6D,0x47,0xC1,0x51,0x8F,0xF3,0xCC,0x5B,0x67,0xBD,0xCD,0x18,0x08,0xC9,
@@ -283,7 +276,7 @@ uint8_t block_sbox[0x100] = {
 };
 
 // block - perm
-uint8_t block_perm[0x100] = {
+static uint8_t block_perm[0x100] = {
     0x00,0x02,0x80,0x82,0x20,0x22,0xA0,0xA2, 0x10,0x12,0x90,0x92,0x30,0x32,0xB0,0xB2,
     0x04,0x06,0x84,0x86,0x24,0x26,0xA4,0xA6, 0x14,0x16,0x94,0x96,0x34,0x36,0xB4,0xB6,
     0x40,0x42,0xC0,0xC2,0x60,0x62,0xE0,0xE2, 0x50,0x52,0xD0,0xD2,0x70,0x72,0xF0,0xF2,
@@ -303,15 +296,19 @@ uint8_t block_perm[0x100] = {
     0x4D,0x4F,0xCD,0xCF,0x6D,0x6F,0xED,0xEF, 0x5D,0x5F,0xDD,0xDF,0x7D,0x7F,0xFD,0xFF,
 };
 
-void key_schedule(csa_ctx_t *ctx, uint8_t *cw)
-{
-    int i,j,k,v;
+void key_schedule(csa_ctx_t *ctx, uint8_t *cw) {
+    int i, j, v;
     uint8_t newbit[64];
     uint8_t kb[64];
 
-    memset(ctx, 0, sizeof(ctx));
-    *(uint64_t *)(ctx->cw) = *(uint64_t *)(cw);
-    *(uint64_t *)(&kb[56]) = *(uint64_t *)(cw);
+    // load first 32 bits of CK into A[0]..A[7]
+    // load last  32 bits of CK into B[0]..B[7]
+    // all other regs = 0
+    for(i=0; i<8; i++) {
+        kb[56 + i] = cw[i];
+        ctx->ccw[i * 2 + 0] = cw[i] >> 4;
+        ctx->ccw[i * 2 + 1] = cw[i] & 0x0F;
+    }
 
     // calculate kb[6] .. kb[1]
     for(i=48; i>=0; i-=8)
@@ -319,10 +316,15 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw)
         // 64 bit perm on kb
         for(j=0; j<=56; j+=8)
         {
-            v = i + (j >> 3);
-            v = kb[8 + v];
-            for(k=0; k<8; k++)
-                newbit[key_perm[j + k] - 1] = (v >> (7 - k)) & 1;
+            v = kb[8 + i + (j >> 3)];
+            newbit[key_perm[j + 0]] = (v >> 7) & 1;
+            newbit[key_perm[j + 1]] = (v >> 6) & 1;
+            newbit[key_perm[j + 2]] = (v >> 5) & 1;
+            newbit[key_perm[j + 3]] = (v >> 4) & 1;
+            newbit[key_perm[j + 4]] = (v >> 3) & 1;
+            newbit[key_perm[j + 5]] = (v >> 2) & 1;
+            newbit[key_perm[j + 6]] = (v >> 1) & 1;
+            newbit[key_perm[j + 7]] = (v     ) & 1;
         }
 
         for(j=0; j<=56; j+=8)
@@ -336,7 +338,7 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw)
                 newbit[j + 4] << 3 |
                 newbit[j + 5] << 2 |
                 newbit[j + 6] << 1 |
-                newbit[j + 7];
+                newbit[j + 7]      ;
             ctx->kk[v] = kb[8 + v] ^ (i >> 3);
         }
     }
@@ -345,26 +347,45 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw)
 
 
 
-static void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
+static inline __attribute__((always_inline)) void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
 {
     int i;
-    uint8_t sbox_out,N;
+    uint8_t sbox_out;
 
-    *(uint64_t *)bd = *(uint64_t *)ib;
-    for(i=55; i>=0; i--)
+    // step 55
+    sbox_out = block_sbox[XOR(ctx->kk[55], ib[6])];
+    ctx->T[55 + 7] = ib[6];
+    ctx->T[55 + 6] = ib[5] ^ block_perm[sbox_out];
+    ctx->T[55 + 5] = ib[4];
+    sbox_out ^= ib[7];
+    ctx->T[55 + 4] = ib[3] ^ sbox_out;
+    ctx->T[55 + 3] = ib[2] ^ sbox_out;
+    ctx->T[55 + 2] = ib[1] ^ sbox_out;
+    ctx->T[55 + 1] = ib[0];
+    ctx->T[55 + 0] = sbox_out;
+
+    for(i=54; i>0; i--)
     {
-        N = bd[6];
-        sbox_out = block_sbox[ctx->kk[i] ^ N];
-        bd[6] = bd[5] ^ block_perm[sbox_out];
-        bd[5] = bd[4];
-        sbox_out ^= bd[7];
-        bd[4] = bd[3] ^ sbox_out;
-        bd[3] = bd[2] ^ sbox_out;
-        bd[2] = bd[1] ^ sbox_out;
-        bd[1] = bd[0];
-        bd[0] = sbox_out;
-        bd[7] = N;
+        sbox_out = block_sbox[XOR(ctx->kk[i], ctx->T[i + 1 + 6])];
+        ctx->T[i + 6] ^= block_perm[sbox_out];
+        sbox_out ^= ctx->T[i + 1 + 7];
+        ctx->T[i + 4] ^= sbox_out;
+        ctx->T[i + 3] ^= sbox_out;
+        ctx->T[i + 2] ^= sbox_out;
+        ctx->T[i] = sbox_out;
     }
+
+    // step 0
+    sbox_out = block_sbox[XOR(ctx->kk[0], ctx->T[7])];
+    bd[7] = ctx->T[7];
+    bd[6] = ctx->T[6] ^ block_perm[sbox_out];
+    bd[5] = ctx->T[5];
+    sbox_out ^= ctx->T[8];
+    bd[4] = ctx->T[4] ^ sbox_out;
+    bd[3] = ctx->T[3] ^ sbox_out;
+    bd[2] = ctx->T[2] ^ sbox_out;
+    bd[1] = ctx->T[1];
+    bd[0] = sbox_out;
 }
 
 
