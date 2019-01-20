@@ -34,13 +34,13 @@
 // reg q,           1 bit
 // reg r,           1 bit
 
-int sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
-int sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
-int sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
-int sbox4[0x20] = {3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1};
-int sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2};
-int sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
-int sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
+static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
+static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
+static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
+static uint8_t sbox4[0x20] = {3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1};
+static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2};
+static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
+static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
 typedef struct {
     uint8_t ccw[16];
@@ -67,131 +67,88 @@ typedef struct {
 #define XOR(V1, V2) ((V1) ^ (V2))
 #define OR(V1, V2) ((V1) | (V2))
 
-#define BIT_LSH(V, S) (((V) & 1) << S)
+#define MASK_01 0x01
+#define BIT_LSH(V, S) (((V) & MASK_01) << S)
 
-#define B_GROUP(S, V1, V2, V3, V4) XOR(BIT_LSH(V1, S), XOR(BIT_LSH(V2, S), XOR(BIT_LSH(V3, S), V4)))
+#define B_GROUP(S, V1, V2, V3, V4) XOR(BIT_LSH(V1, S), XOR(BIT_LSH(V2, S), XOR(BIT_LSH(V3, S), BIT_LSH(V4, S))))
 #define A_GROUP(V1, V2, V3, V4, V5) OR(BIT_LSH(V1, 4), OR(BIT_LSH(V2, 3), OR(BIT_LSH(V3, 2), OR(BIT_LSH(V4, 1), (V5) & 1))))
 #define S_GROUP(V1, V2, V3, V4) OR(BIT_LSH(V1, 3), OR(BIT_LSH(V2, 2), OR((V3) & 2, ((V4) & 2) >> 1)))
 
 #define BIT_IF(COND_MASK, TRUE, FALSE) XOR(FALSE, AND(COND_MASK, XOR(FALSE, TRUE)))
 #define ROTATE_4(V) AND(OR(N << 1, (N >> 3) & 1), 0x0F)
 
-static void stream_init(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
+static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j,iT=32;
-    uint8_t in[2]; // most+least significant nibble of input byte
     uint8_t Z,N;
     uint8_t s1,s2,s3,s4,s5,s6,s7;
 
-    *(uint64_t *)&ctx->A[32] = *(uint64_t *)&ctx->ccw[0];
-    *(uint64_t *)&ctx->B[32] = *(uint64_t *)&ctx->ccw[8];
-    *(uint16_t *)&ctx->A[40] = 0;
-    *(uint16_t *)&ctx->B[40] = 0;
-
-    ctx->X = 0;
-    ctx->Y = 0;
-    ctx->Z = 0;
-    ctx->D = 0;
-    ctx->E = 0;
-    ctx->F = 0;
-    ctx->r = 0;
-    ctx->p = 0;
-    ctx->q = 0;
-
-    // 8 bytes per operation
-    for(i=0; i<8; i++)
+    if(sb)
     {
-        in[0] = sb[i] >> 4;
-        in[1] = sb[i] & 0xf;
+        *(uint64_t *)&ctx->A[32] = *(uint64_t *)&ctx->ccw[0];
+        *(uint64_t *)&ctx->B[32] = *(uint64_t *)&ctx->ccw[8];
+        *(uint16_t *)&ctx->A[40] = 0;
+        *(uint16_t *)&ctx->B[40] = 0;
 
-        // 2 bits per iteration
-        for(j=0; j<4; j++)
+        *(uint64_t *)cb = *(uint64_t *)sb;
+
+        ctx->X = 0;
+        ctx->Y = 0;
+        ctx->Z = 0;
+        ctx->D = 0;
+        ctx->E = 0;
+        ctx->F = 0;
+        ctx->r = 0;
+        ctx->p = 0;
+        ctx->q = 0;
+
+        for(i=0; i<8; i++)
         {
-            // T1 = xor all inputs
-            ctx->A[iT - 1] = XOR(ctx->A[iT + 9], XOR(ctx->X, XOR(in[(j & 1)], ctx->D)));
+            Z = sb[i] >> 4;
+            ctx->A[31 - (i * 4 + 0)] = Z;
+            ctx->A[31 - (i * 4 + 2)] = Z;
+            ctx->B[31 - (i * 4 + 1)] = Z;
+            ctx->B[31 - (i * 4 + 3)] = Z;
 
-            // T2 =  xor all inputs
-            ctx->B[iT - 1] = XOR(ctx->B[iT + 6], XOR(ctx->B[iT + 9], XOR(ctx->Y, in[(j & 1) ^ 1])));
-
-            // T3 = xor all inputs
-            // use 4x4 xor to produce extra nibble for T3
-            ctx->D = XOR(ctx->E, XOR(ctx->Z,
-                OR(B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] & 8),
-                OR(B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] & 4),
-                OR(B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] & 2),
-                   B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] & 1))))));
-
-            // T4 = sum, carry of Z + E + r
-            N = ctx->Z + ctx->E + ctx->r;
-            // N = (ctx->q) ? Z : ctx->E
-            N = BIT_IF(ctx->q * 0xFF, N, ctx->E);
-            // ctx->r = (ctx->q) ? ((N >> 4) & 1) : ctx->r;
-            ctx->r = BIT_IF(ctx->q, (N >> 4) & 1, ctx->r);
-            ctx->E = ctx->F & 0x0F;
-            ctx->F = N;
-            // if p=1, rotate left
-            N = ctx->B[iT - 1];
-            Z = ROTATE_4(N);
-            // ctx->B[iT] = (ctx->p) ? Z : N
-            ctx->B[iT - 1] = BIT_IF(ctx->p * 0xFF, Z, N);
-
-            // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
-            // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[A_GROUP(ctx->A[iT + 3] >> 0, ctx->A[iT + 0] >> 2, ctx->A[iT + 5] >> 1, ctx->A[iT + 6] >> 3, ctx->A[iT + 8] >> 0)];
-            s2 = sbox2[A_GROUP(ctx->A[iT + 1] >> 1, ctx->A[iT + 2] >> 2, ctx->A[iT + 5] >> 3, ctx->A[iT + 6] >> 0, ctx->A[iT + 8] >> 1)];
-            s3 = sbox3[A_GROUP(ctx->A[iT + 0] >> 3, ctx->A[iT + 1] >> 0, ctx->A[iT + 4] >> 1, ctx->A[iT + 4] >> 3, ctx->A[iT + 5] >> 2)];
-            s4 = sbox4[A_GROUP(ctx->A[iT + 2] >> 3, ctx->A[iT + 0] >> 1, ctx->A[iT + 1] >> 3, ctx->A[iT + 3] >> 2, ctx->A[iT + 7] >> 0)];
-            s5 = sbox5[A_GROUP(ctx->A[iT + 4] >> 2, ctx->A[iT + 3] >> 3, ctx->A[iT + 5] >> 0, ctx->A[iT + 7] >> 1, ctx->A[iT + 8] >> 2)];
-            s6 = sbox6[A_GROUP(ctx->A[iT + 2] >> 1, ctx->A[iT + 3] >> 1, ctx->A[iT + 4] >> 0, ctx->A[iT + 6] >> 2, ctx->A[iT + 8] >> 3)];
-            s7 = sbox7[A_GROUP(ctx->A[iT + 1] >> 2, ctx->A[iT + 2] >> 0, ctx->A[iT + 6] >> 1, ctx->A[iT + 7] >> 2, ctx->A[iT + 7] >> 3)];
-
-            ctx->X = S_GROUP(s4, s3, s2, s1);
-            ctx->Y = S_GROUP(s6, s5, s4, s3);
-            ctx->Z = S_GROUP(s2, s1, s6, s5);
-            ctx->p = (s7 >> 1) & 1;
-            ctx->q = s7 & 1;
-
-            iT -= 1;
+            Z = sb[i] & 0x0F;
+            ctx->A[31 - (i * 4 + 1)] = Z;
+            ctx->A[31 - (i * 4 + 3)] = Z;
+            ctx->B[31 - (i * 4 + 0)] = Z;
+            ctx->B[31 - (i * 4 + 2)] = Z;
         }
-
-        // return input data during init
-        cb[i] = sb[i];
     }
 
-    *(uint64_t *)&ctx->A[32] = *(uint64_t *)&ctx->A[0];
-    *(uint16_t *)&ctx->A[40] = *(uint16_t *)&ctx->A[8];
-    *(uint64_t *)&ctx->B[32] = *(uint64_t *)&ctx->B[0];
-    *(uint16_t *)&ctx->B[40] = *(uint16_t *)&ctx->B[8];
-}
-
-static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
-{
-    int i,j,iT=32;
-    uint8_t op;
-    uint8_t Z,N;
-    uint8_t s1,s2,s3,s4,s5,s6,s7;
-
     // 8 bytes per operation
     for(i=0; i<8; i++)
     {
-        op = 0;
-
         // 2 bits per iteration
         for(j=0; j<4; j++)
         {
-            // T1 = xor all inputs
-            ctx->A[iT - 1] = XOR(ctx->A[iT + 9], ctx->X);
 
-            // T2 =  xor all inputs
-            ctx->B[iT - 1] = XOR(ctx->B[iT + 6], XOR(ctx->B[iT + 9], ctx->Y));
+            if(sb)
+            {
+                // T1 = xor all inputs
+                ctx->A[iT - 1] = XOR(ctx->A[iT - 1], XOR(ctx->A[iT + 9], XOR(ctx->X, ctx->D)));
+
+                // T2 =  xor all inputs
+                ctx->B[iT - 1] = XOR(ctx->B[iT - 1], XOR(ctx->B[iT + 9], XOR(ctx->B[iT + 6], ctx->Y)));
+            }
+            else
+            {
+                // T1 = xor all inputs
+                ctx->A[iT - 1] = XOR(ctx->A[iT + 9], ctx->X);
+
+                // T2 =  xor all inputs
+                ctx->B[iT - 1] = XOR(ctx->B[iT + 6], XOR(ctx->B[iT + 9], ctx->Y));
+            }
 
             // T3 = xor all inputs
             // use 4x4 xor to produce extra nibble for T3
             ctx->D = XOR(ctx->E, XOR(ctx->Z,
-                OR(B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] & 8),
-                OR(B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] & 4),
-                OR(B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] & 2),
-                   B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] & 1))))));
+                OR(B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] >> 3),
+                OR(B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] >> 2),
+                OR(B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] >> 1),
+                   B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] >> 0))))));
 
             // T4 = sum, carry of Z + E + r
             N = ctx->Z + ctx->E + ctx->r;
@@ -223,16 +180,17 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
             ctx->p = (s7 >> 1) & 1;
             ctx->q = s7 & 1;
 
-            // require 4 loops per output byte
-            // 2 output bits are a function of the 4 bits of D
-            // xor 2 by 2
-            Z = XOR(ctx->D, ctx->D >> 1);
-            op = XOR(op << 2, OR((Z >> 1) & 2 , Z & 1));
+            if(!sb)
+            {
+                // require 4 loops per output byte
+                // 2 output bits are a function of the 4 bits of D
+                // xor 2 by 2
+                Z = XOR(ctx->D, ctx->D >> 1);
+                cb[i] = XOR(cb[i] << 2, OR((Z >> 1) & 2 , Z & 1));
+            }
 
             iT -= 1;
         }
-        // return input data during init
-        cb[i] = op;
     }
 
     *(uint64_t *)&ctx->A[32] = *(uint64_t *)&ctx->A[0];
@@ -297,7 +255,7 @@ static uint8_t block_perm[0x100] = {
 };
 
 void key_schedule(csa_ctx_t *ctx, uint8_t *cw) {
-    int i, j, v;
+    int i, j, k, v;
     uint8_t newbit[64];
     uint8_t kb[64];
 
@@ -353,18 +311,9 @@ static inline __attribute__((always_inline)) void block_decypher(csa_ctx_t *ctx,
     uint8_t sbox_out;
 
     // step 55
-    sbox_out = block_sbox[XOR(ctx->kk[55], ib[6])];
-    ctx->T[55 + 7] = ib[6];
-    ctx->T[55 + 6] = ib[5] ^ block_perm[sbox_out];
-    ctx->T[55 + 5] = ib[4];
-    sbox_out ^= ib[7];
-    ctx->T[55 + 4] = ib[3] ^ sbox_out;
-    ctx->T[55 + 3] = ib[2] ^ sbox_out;
-    ctx->T[55 + 2] = ib[1] ^ sbox_out;
-    ctx->T[55 + 1] = ib[0];
-    ctx->T[55 + 0] = sbox_out;
+    *(uint64_t *)&ctx->T[56] = *(uint64_t *)ib;
 
-    for(i=54; i>0; i--)
+    for(i=55; i>=0; i--)
     {
         sbox_out = block_sbox[XOR(ctx->kk[i], ctx->T[i + 1 + 6])];
         ctx->T[i + 6] ^= block_perm[sbox_out];
@@ -375,17 +324,7 @@ static inline __attribute__((always_inline)) void block_decypher(csa_ctx_t *ctx,
         ctx->T[i] = sbox_out;
     }
 
-    // step 0
-    sbox_out = block_sbox[XOR(ctx->kk[0], ctx->T[7])];
-    bd[7] = ctx->T[7];
-    bd[6] = ctx->T[6] ^ block_perm[sbox_out];
-    bd[5] = ctx->T[5];
-    sbox_out ^= ctx->T[8];
-    bd[4] = ctx->T[4] ^ sbox_out;
-    bd[3] = ctx->T[3] ^ sbox_out;
-    bd[2] = ctx->T[2] ^ sbox_out;
-    bd[1] = ctx->T[1];
-    bd[0] = sbox_out;
+    *(uint64_t *)bd = *(uint64_t *)ctx->T;
 }
 
 
@@ -561,12 +500,12 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
     for(i=0; i<4; i++) decrypted[i] = encrypted[i];
 
     // 1st 8 bytes of initialisation
-    stream_init(ctx, &encrypted[4], ib);
+    stream_cypher(ctx, &encrypted[4], ib);
 
     for(j=1; j<STEPS; j++)
     {
         block_decypher(ctx, ib, block);
-        stream_cypher(ctx, stream);
+        stream_cypher(ctx, NULL, stream);
         // xor sb x stream
         for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
         // xor ib x block
@@ -615,14 +554,14 @@ void encrypt(csa_ctx_t *ctx, unsigned char *decrypted, unsigned char *encrypted)
 
 
     // 1st 8 bytes of initialisation - ib[1] has popped out of the last block cypher ...
-    stream_init(ctx, ib[1], stream);
+    stream_cypher(ctx, ib[1], stream);
 
     // sb[1] is just ib[1];
     for(i=0; i<8; i++)  encrypted[4+0+i] = ib[1][i];
 
     for(j=2; j<=STEPS; j++)
     {
-        stream_cypher(ctx, stream);
+        stream_cypher(ctx, NULL, stream);
         // xor ib x stream
         for(i=0; i<8; i++)  encrypted[4+8*(j-1)+i] = ib[j][i] ^ stream[i];
     }
