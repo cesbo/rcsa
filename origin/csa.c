@@ -15,14 +15,6 @@
 #include <sys/time.h>
 #include <string.h>
 
-static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
-static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
-static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
-static uint8_t sbox4[0x20] = {3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1};
-static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2};
-static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
-static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
-
 typedef struct {
     uint8_t ccw[16];
 
@@ -43,13 +35,47 @@ typedef struct {
     uint8_t q;
 } csa_ctx_t;
 
-#define BIT_LSH(V, S) (((V) & 1) << S)
+#define BB_00 0x00
+#define BB_01 0x01
+#define BB_0F 0x0F
+#define BB_FF 0xFF
 
-#define B_GROUP(S, V1, V2, V3, V4) (BIT_LSH(V1, S) ^ BIT_LSH(V2, S) ^ BIT_LSH(V3, S) ^ BIT_LSH(V4, S))
-#define A_GROUP(V1, V2, V3, V4, V5) (BIT_LSH(V1, 4) | BIT_LSH(V2, 3) | BIT_LSH(V3, 2) | BIT_LSH(V4, 1) | ((V5) & 1))
-#define S_GROUP(V1, V2, V3, V4) (BIT_LSH(V1, 3) | BIT_LSH(V2, 2) | ((V3) & 2) | (((V4) & 2) >> 1))
+#define BB_AND(A, B) ((A) & (B))
+#define BB_OR(A, B) ((A) | (B))
+#define BB_XOR(A, B) ((A) ^ (B))
+#define BB_LSH(A, B) ((A) << (B))
+#define BB_RSH(A, B) ((A) >> (B))
 
-#define BIT_IF(COND_MASK, TRUE, FALSE) (FALSE ^ ((COND_MASK) & (FALSE ^ TRUE)))
+#define BIT_LSH(V, S) BB_LSH(BB_AND(V, BB_01), S)
+
+#define A_GROUP(V1, V2, V3, V4, V5)                 \
+    BB_OR(BIT_LSH(V1, 4),                           \
+    BB_OR(BIT_LSH(V2, 3),                           \
+    BB_OR(BIT_LSH(V3, 2),                           \
+    BB_OR(BIT_LSH(V4, 1),                           \
+          BB_AND(V5, BB_01)))))
+
+#define B_GROUP(S, V1, V2, V3, V4)                  \
+    BB_XOR(BIT_LSH(V1, S),                          \
+    BB_XOR(BIT_LSH(V2, S),                          \
+    BB_XOR(BIT_LSH(V3, S),                          \
+           BIT_LSH(V4, S))))
+
+#define S_GROUP(V1, V2, V3, V4)                     \
+    BB_OR(BIT_LSH(V1, 3),                           \
+    BB_OR(BIT_LSH(V2, 2),                           \
+    BB_OR(BIT_LSH(BB_AND(BB_RSH(V3, 1), BB_01), 1), \
+          BB_AND(BB_RSH(V4, 1), BB_01))))
+
+#define BIT_IF(COND_MASK, TRUE, FALSE) BB_XOR(FALSE, BB_AND(COND_MASK, BB_XOR(FALSE, TRUE)))
+
+static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
+static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
+static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
+static uint8_t sbox4[0x20] = {3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1};
+static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2};
+static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
+static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
 static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
