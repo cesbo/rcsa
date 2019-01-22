@@ -79,8 +79,7 @@ static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2,
 
 static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
-    int i,j,iT = 32;
-    uint8_t Z,N,T;
+    int i,j;
     uint8_t s1,s2,s3,s4,s5,s6,s7;
     uint8_t M = 0x00;
 
@@ -91,17 +90,17 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             ctx->A[32 + i] = ctx->ccw[0 + i];
             ctx->B[32 + i] = ctx->ccw[8 + i];
 
-            Z = sb[i] >> 4;
-            ctx->A[31 - (i * 4 + 0)] = Z;
-            ctx->A[31 - (i * 4 + 2)] = Z;
-            ctx->B[31 - (i * 4 + 1)] = Z;
-            ctx->B[31 - (i * 4 + 3)] = Z;
+            s1 = sb[i] >> 4;
+            ctx->A[31 - (i * 4 + 0)] = s1;
+            ctx->A[31 - (i * 4 + 2)] = s1;
+            ctx->B[31 - (i * 4 + 1)] = s1;
+            ctx->B[31 - (i * 4 + 3)] = s1;
 
-            Z = sb[i] & 0x0F;
-            ctx->A[31 - (i * 4 + 1)] = Z;
-            ctx->A[31 - (i * 4 + 3)] = Z;
-            ctx->B[31 - (i * 4 + 0)] = Z;
-            ctx->B[31 - (i * 4 + 2)] = Z;
+            s1 = sb[i] & 0x0F;
+            ctx->A[31 - (i * 4 + 1)] = s1;
+            ctx->A[31 - (i * 4 + 3)] = s1;
+            ctx->B[31 - (i * 4 + 0)] = s1;
+            ctx->B[31 - (i * 4 + 2)] = s1;
         }
 
         ctx->A[40] = 0;
@@ -110,7 +109,7 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->B[41] = 0;
 
         ctx->X = 0;
-        ctx->Y = ctx->B[32 + 6];
+        ctx->Y = 0;
         ctx->Z = 0;
         ctx->D = 0;
         ctx->E = 0;
@@ -122,65 +121,59 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         M = 0xFF;
     }
 
-    // 8 bytes per operation
-    for(i=0; i<8; i++)
+    // 8 bytes and 4 bits per operation
+    for(i=0; i<32; i++)
     {
-        // 2 bits per iteration
-        for(j=0; j<4; j++)
-        {
-            // T1
-            Z = ctx->X ^ ctx->A[iT - 1] ^ ctx->D;
-            ctx->A[iT - 1] = BIT_IF(M, Z, ctx->X);
+        j = 31 - i;
 
-            // T2
-            Z = ctx->Y ^ ctx->B[iT - 1];
-            ctx->B[iT - 1] = BIT_IF(M, Z, ctx->Y);
+        // T1
+        ctx->X = ctx->X ^ ctx->A[j + 10];
+        s1 = ctx->X ^ ctx->A[j] ^ ctx->D;
+        ctx->A[j] = BIT_IF(M, s1, ctx->X);
 
-            // T3
-            ctx->D = ctx->E ^ ctx->Z ^ (
-                B_GROUP(3, ctx->B[iT + 2] >> 0, ctx->B[iT + 5] >> 1, ctx->B[iT + 6] >> 2, ctx->B[iT + 8] >> 3) |
-                B_GROUP(2, ctx->B[iT + 5] >> 0, ctx->B[iT + 7] >> 1, ctx->B[iT + 2] >> 3, ctx->B[iT + 3] >> 2) |
-                B_GROUP(1, ctx->B[iT + 4] >> 3, ctx->B[iT + 7] >> 2, ctx->B[iT + 3] >> 0, ctx->B[iT + 4] >> 1) |
-                B_GROUP(0, ctx->B[iT + 8] >> 2, ctx->B[iT + 5] >> 3, ctx->B[iT + 2] >> 1, ctx->B[iT + 7] >> 0) );
+        // T3
+        ctx->D = ctx->E ^ ctx->Z ^ (
+            B_GROUP(3, ctx->B[j + 3] >> 0, ctx->B[j + 6] >> 1, ctx->B[j + 7] >> 2, ctx->B[j + 9] >> 3) |
+            B_GROUP(2, ctx->B[j + 6] >> 0, ctx->B[j + 8] >> 1, ctx->B[j + 3] >> 3, ctx->B[j + 4] >> 2) |
+            B_GROUP(1, ctx->B[j + 5] >> 3, ctx->B[j + 8] >> 2, ctx->B[j + 4] >> 0, ctx->B[j + 5] >> 1) |
+            B_GROUP(0, ctx->B[j + 9] >> 2, ctx->B[j + 6] >> 3, ctx->B[j + 3] >> 1, ctx->B[j + 8] >> 0) );
 
-            // T4
-            N = ctx->Z + ctx->E + ctx->r;
-            N = BIT_IF(ctx->q, N, ctx->E);
-            ctx->r = BIT_IF(ctx->q, (N >> 4) & 1, ctx->r);
-            ctx->E = ctx->F & 0x0F;
-            ctx->F = N;
-            // if p=1, rotate left
-            N = ctx->B[iT - 1];
-            Z = ((N << 1) | ((N >> 3) & 1)) & 0x0F;
-            ctx->B[iT - 1] = BIT_IF(ctx->p, Z, N);
+        // T4
+        s1 = ctx->Z + ctx->E + ctx->r;
+        s1 = BIT_IF(ctx->q, s1, ctx->E);
+        ctx->r = BIT_IF(ctx->q, (s1 >> 4) & 1, ctx->r);
+        ctx->E = ctx->F & 0x0F;
+        ctx->F = s1;
+        // if p=1, rotate left
+        ctx->Y = ctx->Y ^ ctx->B[j + 10] ^ ctx->B[j + 7];
+        s1 = ctx->Y ^ ctx->B[j];
+        s1 = BIT_IF(M, s1, ctx->Y);
+        s2 = ((s1 << 1) | ((s1 >> 3) & 1)) & 0x0F;
+        ctx->B[j] = BIT_IF(ctx->p, s2, s1);
 
-            // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
-            // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[A_GROUP(ctx->A[iT + 3] >> 0, ctx->A[iT + 0] >> 2, ctx->A[iT + 5] >> 1, ctx->A[iT + 6] >> 3, ctx->A[iT + 8] >> 0)];
-            s2 = sbox2[A_GROUP(ctx->A[iT + 1] >> 1, ctx->A[iT + 2] >> 2, ctx->A[iT + 5] >> 3, ctx->A[iT + 6] >> 0, ctx->A[iT + 8] >> 1)];
-            s3 = sbox3[A_GROUP(ctx->A[iT + 0] >> 3, ctx->A[iT + 1] >> 0, ctx->A[iT + 4] >> 1, ctx->A[iT + 4] >> 3, ctx->A[iT + 5] >> 2)];
-            s4 = sbox4[A_GROUP(ctx->A[iT + 2] >> 3, ctx->A[iT + 0] >> 1, ctx->A[iT + 1] >> 3, ctx->A[iT + 3] >> 2, ctx->A[iT + 7] >> 0)];
-            s5 = sbox5[A_GROUP(ctx->A[iT + 4] >> 2, ctx->A[iT + 3] >> 3, ctx->A[iT + 5] >> 0, ctx->A[iT + 7] >> 1, ctx->A[iT + 8] >> 2)];
-            s6 = sbox6[A_GROUP(ctx->A[iT + 2] >> 1, ctx->A[iT + 3] >> 1, ctx->A[iT + 4] >> 0, ctx->A[iT + 6] >> 2, ctx->A[iT + 8] >> 3)];
-            s7 = sbox7[A_GROUP(ctx->A[iT + 1] >> 2, ctx->A[iT + 2] >> 0, ctx->A[iT + 6] >> 1, ctx->A[iT + 7] >> 2, ctx->A[iT + 7] >> 3)];
+        // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
+        // 5 bits input per s-box, 2 bits output per s-box
+        s1 = sbox1[A_GROUP(ctx->A[j + 4] >> 0, ctx->A[j + 1] >> 2, ctx->A[j + 6] >> 1, ctx->A[j + 7] >> 3, ctx->A[j + 9] >> 0)];
+        s2 = sbox2[A_GROUP(ctx->A[j + 2] >> 1, ctx->A[j + 3] >> 2, ctx->A[j + 6] >> 3, ctx->A[j + 7] >> 0, ctx->A[j + 9] >> 1)];
+        s3 = sbox3[A_GROUP(ctx->A[j + 1] >> 3, ctx->A[j + 2] >> 0, ctx->A[j + 5] >> 1, ctx->A[j + 5] >> 3, ctx->A[j + 6] >> 2)];
+        s4 = sbox4[A_GROUP(ctx->A[j + 3] >> 3, ctx->A[j + 1] >> 1, ctx->A[j + 2] >> 3, ctx->A[j + 4] >> 2, ctx->A[j + 8] >> 0)];
+        s5 = sbox5[A_GROUP(ctx->A[j + 5] >> 2, ctx->A[j + 4] >> 3, ctx->A[j + 6] >> 0, ctx->A[j + 8] >> 1, ctx->A[j + 9] >> 2)];
+        s6 = sbox6[A_GROUP(ctx->A[j + 3] >> 1, ctx->A[j + 4] >> 1, ctx->A[j + 5] >> 0, ctx->A[j + 7] >> 2, ctx->A[j + 9] >> 3)];
+        s7 = sbox7[A_GROUP(ctx->A[j + 2] >> 2, ctx->A[j + 3] >> 0, ctx->A[j + 7] >> 1, ctx->A[j + 8] >> 2, ctx->A[j + 8] >> 3)];
 
-            ctx->X = S_GROUP(s4, s3, s2, s1);
-            ctx->X = ctx->X ^ ctx->A[iT + 8];
-            ctx->Y = S_GROUP(s6, s5, s4, s3);
-            ctx->Y = ctx->Y ^ ctx->B[iT + 8] ^ ctx->B[iT + 5];
-            ctx->Z = S_GROUP(s2, s1, s6, s5);
-            ctx->p = ((s7 >> 1) & 1) * 0xFF;
-            ctx->q = (s7 & 1) * 0xFF;
+        ctx->X = S_GROUP(s4, s3, s2, s1);
+        ctx->Y = S_GROUP(s6, s5, s4, s3);
+        ctx->Z = S_GROUP(s2, s1, s6, s5);
+        ctx->p = ((s7 >> 1) & 1) * 0xFF;
+        ctx->q = (s7 & 1) * 0xFF;
 
-            // require 4 loops per output byte
-            // 2 output bits are a function of the 4 bits of D
-            // xor 2 by 2
-            Z = ctx->D ^ ctx->D >> 1;
-            Z = (cb[i] << 2) ^ (((Z >> 1) & 2) | (Z & 1));
-            cb[i] = BIT_IF(M, sb[i], Z);
-
-            iT -= 1;
-        }
+        // require 4 loops per output byte
+        // 2 output bits are a function of the 4 bits of D
+        // xor 2 by 2
+        j = i >> 2;
+        s1 = ctx->D ^ (ctx->D >> 1);
+        s1 = (cb[j] << 2) ^ (((s1 >> 1) & 2) | (s1 & 1));
+        cb[j] = BIT_IF(M, sb[j], s1);
     }
 
     for(i=0; i<8; i++)
@@ -489,12 +482,12 @@ int main(void)
 
     decrypt(&ctx, encrypted1, decrypted1); compare("decryption", decrypted1, expected1);
 
-    struct timeval tvs, tve;
-    gettimeofday(&tvs,NULL);
-    for(int z=0; z<TS_PKTS_FOR_TEST; z++) decrypt(&ctx, encrypted1, decrypted1);
-    gettimeofday(&tve,NULL);
-    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
-    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+//    struct timeval tvs, tve;
+//    gettimeofday(&tvs,NULL);
+//    for(int z=0; z<TS_PKTS_FOR_TEST; z++) decrypt(&ctx, encrypted1, decrypted1);
+//    gettimeofday(&tve,NULL);
+//    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+//    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
 
     return 0;
 }
