@@ -75,6 +75,7 @@ static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1,
 static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
 static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
+
 static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j;
@@ -148,18 +149,6 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             B_GROUP(1, ctx->B[j + 5] >> 3, ctx->B[j + 8] >> 2, ctx->B[j + 4] >> 0, ctx->B[j + 5] >> 1) |
             B_GROUP(0, ctx->B[j + 9] >> 2, ctx->B[j + 6] >> 3, ctx->B[j + 3] >> 1, ctx->B[j + 8] >> 0) );
 
-        // require 4 loops per output byte
-        // 2 output bits are a function of the 4 bits of D
-        // xor 2 by 2
-        if(!sb)
-        {
-            s1 = ctx->D ^ (ctx->D >> 1);
-            s1 = ((s1 >> 1) & 2) | (s1 & 1);
-            s2 = i >> 2;
-
-            cb[s2] = (cb[s2] << 2) | s1;
-        }
-
         // T4
         s1 = ctx->F;
         if(ctx->q)
@@ -188,6 +177,19 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->Z = S_GROUP(s2, s1, s6, s5);
         ctx->p = s7 & 2;
         ctx->q = s7 & 1;
+
+        // require 4 loops per output byte
+        // 2 output bits are a function of the 4 bits of D
+        // xor 2 by 2
+        if(!sb)
+        {
+            s1 = ctx->D ^ (ctx->D >> 1);
+            s1 = ((s1 >> 1) & 2) | (s1 & 1);
+            s2 = i >> 2;
+
+            cb[s2] = (cb[s2] << 2) | s1;
+        }
+
     }
 
     memcpy(&ctx->A[32], &ctx->A[0], 10);
@@ -295,32 +297,28 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw) {
 }
 
 
-
-
 static void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
 {
     int i;
     uint8_t sbox_out;
-    uint8_t N, T[8];
 
-    memcpy(T, ib, 8);
+    memcpy(bd, ib, 8);
 
-    for(i=55; i>=0; i--)
+    for(i = 55; i >= 0; i -= 1)
     {
-        N = T[7];
-        sbox_out = block_sbox[ctx->kk[i] ^ T[6]];
-        T[7] = T[6];
-        T[6] = T[5] ^ block_perm[sbox_out];
-        T[5] = T[4];
-        sbox_out ^= N;
-        T[4] = T[3] ^ sbox_out;
-        T[3] = T[2] ^ sbox_out;
-        T[2] = T[1] ^ sbox_out;
-        T[1] = T[0];
-        T[0] = sbox_out;
-    }
+        sbox_out = block_sbox[ctx->kk[i] ^ bd[6]];
+        bd[5] ^= block_perm[sbox_out];
+        sbox_out ^= bd[7];
 
-    memcpy(bd, T, 8);
+        bd[7] = bd[6];
+        bd[6] = bd[5];
+        bd[5] = bd[4];
+        bd[4] = bd[3] ^ sbox_out;
+        bd[3] = bd[2] ^ sbox_out;
+        bd[2] = bd[1] ^ sbox_out;
+        bd[1] = bd[0];
+        bd[0] = sbox_out;
+    }
 }
 
 //
