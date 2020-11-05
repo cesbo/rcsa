@@ -69,7 +69,7 @@ typedef struct {
           BB_AND(BB_RSH(V4, 1), BB_01))))
 
 
-static void nibble_array(uint8_t *dst, const uint8_t *src)
+static inline void nibble_array(uint8_t *dst, const uint8_t *src)
 {
     for(int i = 0; i < 8; i += 1)
     {
@@ -79,12 +79,8 @@ static void nibble_array(uint8_t *dst, const uint8_t *src)
 }
 
 
-static uint8_t nibble_rotate_left(uint8_t value) {
-    static const uint8_t map[] = {
-        0x00, 0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x0e,
-        0x01, 0x03, 0x05, 0x07, 0x09, 0x0b, 0x0d, 0x0f
-    };
-    return map[value];
+static inline uint8_t nibble_rotate_left(uint8_t value) {
+    return ((value << 1) & 0x0F) | ((value >> 3) & 1);
 }
 
 
@@ -99,11 +95,19 @@ static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2,
 
 static void stream_init(csa_ctx_t *ctx)
 {
-    memcpy(&ctx->A[32], &ctx->ccw[0], 8);
-    memset(&ctx->A[40], 0, 2);
+    int i;
 
-    memcpy(&ctx->B[32], &ctx->ccw[8], 8);
-    memset(&ctx->B[40], 0, 2);
+    for(i = 0; i < 8; i += 1)
+    {
+        ctx->A[32 + i] = ctx->ccw[0 + i];
+        ctx->B[32 + i] = ctx->ccw[8 + i];
+    }
+
+    for(i = 0; i < 2; i += 1)
+    {
+        ctx->A[40 + i] = 0;
+        ctx->B[40 + i] = 0;
+    }
 
     ctx->X = 0;
     ctx->Y = 0;
@@ -125,51 +129,31 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
     uint8_t *A = &ctx->A[31];
     uint8_t *B = &ctx->B[31];
 
-    int op, extra_B;
-
     // 8 bytes per operation
     for(i = 0; i < 8; i += 1)
     {
-        op = 0;
-
         // 2 bits per iteration
         for (j = 0; j < 4; j++)
         {
+            // T1 = xor all inputs
+            A[0] = A[10] ^ ctx->X;
+            if(sb)
+                A[0] ^= ctx->D ^ sb[i * 2 + (j & 1)];
 
-            // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
-            // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[A_GROUP(A[4] >> 0, A[1] >> 2, A[6] >> 1, A[7] >> 3, A[9] >> 0)];
-            s2 = sbox2[A_GROUP(A[2] >> 1, A[3] >> 2, A[6] >> 3, A[7] >> 0, A[9] >> 1)];
-            s3 = sbox3[A_GROUP(A[1] >> 3, A[2] >> 0, A[5] >> 1, A[5] >> 3, A[6] >> 2)];
-            s4 = sbox4[A_GROUP(A[3] >> 3, A[1] >> 1, A[2] >> 3, A[4] >> 2, A[8] >> 0)];
-            s5 = sbox5[A_GROUP(A[5] >> 2, A[4] >> 3, A[6] >> 0, A[8] >> 1, A[9] >> 2)];
-            s6 = sbox6[A_GROUP(A[3] >> 1, A[4] >> 1, A[5] >> 0, A[7] >> 2, A[9] >> 3)];
-            s7 = sbox7[A_GROUP(A[2] >> 2, A[3] >> 0, A[7] >> 1, A[8] >> 2, A[8] >> 3)];
+            // T2 =  xor all inputs
+            B[0] = B[7] ^ B[10] ^ ctx->Y;
+            if(sb)
+                B[0] ^= sb[i * 2 + 1 - (j & 1)];
+            if(ctx->p != 0)
+                B[0] = nibble_rotate_left(B[0]);
 
-            extra_B =
+            // T3 = xor all inputs
+            tmp =
                 B_GROUP(3, B[3] >> 0, B[6] >> 1, B[7] >> 2, B[9] >> 3) |
                 B_GROUP(2, B[6] >> 0, B[8] >> 1, B[3] >> 3, B[4] >> 2) |
                 B_GROUP(1, B[5] >> 3, B[8] >> 2, B[4] >> 0, B[5] >> 1) |
                 B_GROUP(0, B[9] >> 2, B[6] >> 3, B[3] >> 1, B[8] >> 0) ;
-
-            // T1 = xor all inputs
-            tmp = A[10] ^ ctx->X;
-            if(sb)
-                tmp = tmp ^ ctx->D ^ sb[i * 2 + (j & 1)];
-            A[0] = tmp;
-            A -= 1;
-
-            // T2 =  xor all inputs
-            tmp = B[7] ^ B[10] ^ ctx->Y;
-            if(sb)
-                tmp = tmp ^ sb[i * 2 + 1 - (j & 1)];
-            if(ctx->p != 0)
-                tmp = nibble_rotate_left(tmp);
-            B[0] = tmp;
-            B -= 1;
-
-            // T3 = xor all inputs
-            ctx->D = ctx->E ^ ctx->Z ^ extra_B;
+            ctx->D = ctx->E ^ ctx->Z ^ tmp;
 
             // T4 = sum, carry of Z + E + r
             tmp = ctx->F;
@@ -185,11 +169,20 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
             }
             ctx->E = tmp;
 
-            // commit
+            // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
+            // 5 bits input per s-box, 2 bits output per s-box
+            s1 = sbox1[A_GROUP(A[4] >> 0, A[1] >> 2, A[6] >> 1, A[7] >> 3, A[9] >> 0)];
+            s2 = sbox2[A_GROUP(A[2] >> 1, A[3] >> 2, A[6] >> 3, A[7] >> 0, A[9] >> 1)];
+            s3 = sbox3[A_GROUP(A[1] >> 3, A[2] >> 0, A[5] >> 1, A[5] >> 3, A[6] >> 2)];
+            s4 = sbox4[A_GROUP(A[3] >> 3, A[1] >> 1, A[2] >> 3, A[4] >> 2, A[8] >> 0)];
+            s5 = sbox5[A_GROUP(A[5] >> 2, A[4] >> 3, A[6] >> 0, A[8] >> 1, A[9] >> 2)];
+            s6 = sbox6[A_GROUP(A[3] >> 1, A[4] >> 1, A[5] >> 0, A[7] >> 2, A[9] >> 3)];
+            s7 = sbox7[A_GROUP(A[2] >> 2, A[3] >> 0, A[7] >> 1, A[8] >> 2, A[8] >> 3)];
 
             ctx->X = S_GROUP(s4, s3, s2, s1);
             ctx->Y = S_GROUP(s6, s5, s4, s3);
             ctx->Z = S_GROUP(s2, s1, s6, s5);
+
             ctx->p = (s7 & 2) >> 1;
             ctx->q = s7 & 1;
 
@@ -202,11 +195,17 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
                 tmp = ((tmp >> 1) & 2) | (tmp & 1);
                 cb[i] = (cb[i] << 2) | tmp;
             }
+
+            A -= 1;
+            B -= 1;
         }
     }
 
-    memcpy(&ctx->A[32], ctx->A, 10);
-    memcpy(&ctx->B[32], ctx->B, 10);
+    for(i = 0; i < 10; i += 1)
+    {
+        ctx->A[32 + i] = ctx->A[i];
+        ctx->B[32 + i] = ctx->B[i];
+    }
 }
 
 
@@ -317,23 +316,22 @@ static uint8_t block_perm[0x100] = {
 static void block_decypher(csa_ctx_t *ctx, uint8_t *ib)
 {
     int i;
-    uint8_t sbox_out;
-    uint8_t *T = &ctx->T[56];
+    uint8_t T6 = ib[6], sbox_out = 0;
 
-    memcpy(T, ib, 8);
+    for(i = 0; i < 8; i += 1)
+        ctx->T[56 + i] = ib[i];
 
     for(i = 55; i >= 0; i -= 1)
     {
-        T -= 1;
+        T6 ^= ctx->kk[i];
+        sbox_out = block_sbox[T6];
+        T6 = ctx->T[i + 6] = ctx->T[i + 6] ^ block_perm[sbox_out];
 
-        sbox_out = block_sbox[ctx->kk[i] ^ T[7]];
-        T[6] ^= block_perm[sbox_out];
-        sbox_out ^= T[8];
-
-        T[4] ^= sbox_out;
-        T[3] ^= sbox_out;
-        T[2] ^= sbox_out;
-        T[0] = sbox_out;
+        sbox_out = sbox_out ^ ctx->T[i + 8];
+        ctx->T[i + 4] ^= sbox_out;
+        ctx->T[i + 3] ^= sbox_out;
+        ctx->T[i + 2] ^= sbox_out;
+        ctx->T[i + 0] = sbox_out;
     }
 }
 
