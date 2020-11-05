@@ -16,7 +16,7 @@
 #include <string.h>
 
 typedef struct {
-    uint8_t ccw[16];
+    uint8_t ccw[20];
 
     // block cypher
     uint8_t kk[56];
@@ -86,11 +86,8 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     {
         memcpy(cb, sb, 8);
 
-        memcpy(&ctx->A[32], &ctx->ccw[0], 8);
-        memcpy(&ctx->B[32], &ctx->ccw[8], 8);
-
-        memset(&ctx->A[40], 0, 2);
-        memset(&ctx->B[40], 0, 2);
+        memcpy(&ctx->A[32], &ctx->ccw[ 0], 10);
+        memcpy(&ctx->B[32], &ctx->ccw[10], 10);
 
         for(i = 0, j = 28; i < 8; i += 1, j -= 4)
         {
@@ -218,9 +215,30 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw) {
     // all other regs = 0
     for(i=0; i<8; i++) {
         kb[56 + i] = cw[i];
-        ctx->ccw[i * 2 + 0] = cw[i] >> 4;
-        ctx->ccw[i * 2 + 1] = cw[i] & 0x0F;
     }
+
+    ctx->ccw[0] = cw[0] >> 4;
+    ctx->ccw[1] = cw[0] & 0x0F;
+    ctx->ccw[2] = cw[1] >> 4;
+    ctx->ccw[3] = cw[1] & 0x0F;
+    ctx->ccw[4] = cw[2] >> 4;
+    ctx->ccw[5] = cw[2] & 0x0F;
+    ctx->ccw[6] = cw[3] >> 4;
+    ctx->ccw[7] = cw[3] & 0x0F;
+    ctx->ccw[8] = 0;
+    ctx->ccw[9] = 0;
+
+    ctx->ccw[10] = cw[4] >> 4;
+    ctx->ccw[11] = cw[4] & 0x0F;
+    ctx->ccw[12] = cw[5] >> 4;
+    ctx->ccw[13] = cw[5] & 0x0F;
+    ctx->ccw[14] = cw[6] >> 4;
+    ctx->ccw[15] = cw[6] & 0x0F;
+    ctx->ccw[16] = cw[7] >> 4;
+    ctx->ccw[17] = cw[7] & 0x0F;
+    ctx->ccw[18] = 0;
+    ctx->ccw[19] = 0;
+
 
     // calculate kb[6] .. kb[1]
     for(i=48; i>=0; i-=8)
