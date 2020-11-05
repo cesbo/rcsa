@@ -67,8 +67,6 @@ typedef struct {
     BB_OR(BIT_LSH(BB_AND(BB_RSH(V3, 1), BB_01), 1), \
           BB_AND(BB_RSH(V4, 1), BB_01))))
 
-#define BIT_IF(COND_MASK, TRUE, FALSE) BB_XOR(FALSE, BB_AND(COND_MASK, BB_XOR(FALSE, TRUE)))
-
 static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
 static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
 static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
@@ -81,7 +79,6 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 {
     int i,j;
     uint8_t s1,s2,s3,s4,s5,s6,s7;
-    uint8_t M = 0x00;
 
     if(sb)
     {
@@ -117,8 +114,6 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->r = 0;
         ctx->p = 0;
         ctx->q = 0;
-
-        M = 0xFF;
     }
 
     // 8 bytes and 4 bits per operation
@@ -128,8 +123,11 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
         // T1
         ctx->X = ctx->X ^ ctx->A[j + 10];
-        s1 = ctx->X ^ ctx->A[j] ^ ctx->D;
-        ctx->A[j] = BIT_IF(M, s1, ctx->X);
+
+        if(sb)
+            ctx->A[j] = ctx->X ^ ctx->A[j] ^ ctx->D;
+        else
+            ctx->A[j] = ctx->X;
 
         // T3
         ctx->D = ctx->E ^ ctx->Z ^ (
@@ -139,17 +137,30 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             B_GROUP(0, ctx->B[j + 9] >> 2, ctx->B[j + 6] >> 3, ctx->B[j + 3] >> 1, ctx->B[j + 8] >> 0) );
 
         // T4
-        s1 = ctx->Z + ctx->E + ctx->r;
-        s1 = BIT_IF(ctx->q, s1, ctx->E);
-        ctx->r = BIT_IF(ctx->q, (s1 >> 4) & 1, ctx->r);
-        ctx->E = ctx->F & 0x0F;
-        ctx->F = s1;
+        s1 = ctx->F;
+        if(ctx->q)
+        {
+            ctx->F = ctx->E + ctx->Z + ctx->r;
+            ctx->r = (ctx->F >> 4) & 1;
+        }
+        else
+        {
+            ctx->F = ctx->E;
+        }
+        ctx->E = s1 & 0x0F;
+
         // if p=1, rotate left
         ctx->Y = ctx->Y ^ ctx->B[j + 10] ^ ctx->B[j + 7];
-        s1 = ctx->Y ^ ctx->B[j];
-        s1 = BIT_IF(M, s1, ctx->Y);
-        s2 = ((s1 << 1) | ((s1 >> 3) & 1)) & 0x0F;
-        ctx->B[j] = BIT_IF(ctx->p, s2, s1);
+
+        if(sb)
+            s1 = ctx->Y ^ ctx->B[j];
+        else
+            s1 = ctx->Y;
+
+        if(ctx->p)
+            ctx->B[j] = ((s1 << 1) | ((s1 >> 3) & 1)) & 0x0F;
+        else
+            ctx->B[j] = s1;
 
         // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
         // 5 bits input per s-box, 2 bits output per s-box
@@ -171,9 +182,14 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         // 2 output bits are a function of the 4 bits of D
         // xor 2 by 2
         j = i >> 2;
-        s1 = ctx->D ^ (ctx->D >> 1);
-        s1 = (cb[j] << 2) ^ (((s1 >> 1) & 2) | (s1 & 1));
-        cb[j] = BIT_IF(M, sb[j], s1);
+
+        if(sb)
+            cb[j] = sb[j];
+        else
+        {
+            s1 = ctx->D ^ (ctx->D >> 1);
+            cb[j] = (cb[j] << 2) ^ (((s1 >> 1) & 2) | (s1 & 1));
+        }
     }
 
     for(i=0; i<8; i++)
@@ -442,11 +458,13 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++) decrypted[i] = encrypted[i];
 
+printf("%s:%d\n", __func__, __LINE__);
     // 1st 8 bytes of initialisation
     stream_cypher(ctx, &encrypted[4], ib);
 
     for(j=1; j<STEPS; j++)
     {
+printf("%s:%d j=%d\n", __func__, __LINE__, j);
         block_decypher(ctx, ib, block);
         stream_cypher(ctx, NULL, stream);
         // xor sb x stream
@@ -478,6 +496,7 @@ void compare(const char *name, const uint8_t *b1, const uint8_t *b2)
 int main(void)
 {
     csa_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     key_schedule(&ctx, key1);
 
     decrypt(&ctx, encrypted1, decrypted1); compare("decryption", decrypted1, expected1);
