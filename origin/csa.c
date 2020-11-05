@@ -82,22 +82,27 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
     if(sb)
     {
-        for(i=0; i<8; i++)
+        for(i = 0, j = 28; i < 8; i += 1, j -= 4)
         {
             ctx->A[32 + i] = ctx->ccw[0 + i];
             ctx->B[32 + i] = ctx->ccw[8 + i];
 
             s1 = sb[i] >> 4;
-            ctx->A[31 - (i * 4 + 0)] = s1;
-            ctx->A[31 - (i * 4 + 2)] = s1;
-            ctx->B[31 - (i * 4 + 1)] = s1;
-            ctx->B[31 - (i * 4 + 3)] = s1;
+            s2 = sb[i] & 0x0F;
 
-            s1 = sb[i] & 0x0F;
-            ctx->A[31 - (i * 4 + 1)] = s1;
-            ctx->A[31 - (i * 4 + 3)] = s1;
-            ctx->B[31 - (i * 4 + 0)] = s1;
-            ctx->B[31 - (i * 4 + 2)] = s1;
+            ctx->A[j + 3] = s1;
+            ctx->A[j + 2] = s2;
+
+            ctx->A[j + 1] = s1;
+            ctx->A[j + 0] = s2;
+
+            ctx->B[j + 2] = s1;
+            ctx->B[j + 3] = s2;
+
+            ctx->B[j + 0] = s1;
+            ctx->B[j + 1] = s2;
+
+            cb[i] = sb[i];
         }
 
         ctx->A[40] = 0;
@@ -117,17 +122,26 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
     }
 
     // 8 bytes and 4 bits per operation
-    for(i=0; i<32; i++)
+    for(i = 0, j = 31; i < 32; i += 1, j -= 1)
     {
-        j = 31 - i;
-
         // T1
         ctx->X = ctx->X ^ ctx->A[j + 10];
+        ctx->Y = ctx->Y ^ ctx->B[j + 10] ^ ctx->B[j + 7];
 
         if(sb)
+        {
             ctx->A[j] = ctx->X ^ ctx->A[j] ^ ctx->D;
+            ctx->B[j] = ctx->Y ^ ctx->B[j];
+        }
         else
+        {
             ctx->A[j] = ctx->X;
+            ctx->B[j] = ctx->Y;
+        }
+
+        // if p=1, rotate left
+        if(ctx->p)
+            ctx->B[j] = ((ctx->B[j] << 1) | ((ctx->B[j] >> 3) & 1)) & 0x0F;
 
         // T3
         ctx->D = ctx->E ^ ctx->Z ^ (
@@ -135,6 +149,18 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             B_GROUP(2, ctx->B[j + 6] >> 0, ctx->B[j + 8] >> 1, ctx->B[j + 3] >> 3, ctx->B[j + 4] >> 2) |
             B_GROUP(1, ctx->B[j + 5] >> 3, ctx->B[j + 8] >> 2, ctx->B[j + 4] >> 0, ctx->B[j + 5] >> 1) |
             B_GROUP(0, ctx->B[j + 9] >> 2, ctx->B[j + 6] >> 3, ctx->B[j + 3] >> 1, ctx->B[j + 8] >> 0) );
+
+        // require 4 loops per output byte
+        // 2 output bits are a function of the 4 bits of D
+        // xor 2 by 2
+        if(!sb)
+        {
+            s1 = ctx->D ^ (ctx->D >> 1);
+            s1 = ((s1 >> 1) & 2) | (s1 & 1);
+            s2 = i >> 2;
+
+            cb[s2] = (cb[s2] << 2) ^ s1;
+        }
 
         // T4
         s1 = ctx->F;
@@ -148,19 +174,6 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             ctx->F = ctx->E;
         }
         ctx->E = s1 & 0x0F;
-
-        // if p=1, rotate left
-        ctx->Y = ctx->Y ^ ctx->B[j + 10] ^ ctx->B[j + 7];
-
-        if(sb)
-            s1 = ctx->Y ^ ctx->B[j];
-        else
-            s1 = ctx->Y;
-
-        if(ctx->p)
-            ctx->B[j] = ((s1 << 1) | ((s1 >> 3) & 1)) & 0x0F;
-        else
-            ctx->B[j] = s1;
 
         // from A[0]..A[9], 35 bits are selected as inputs to 7 s-boxes
         // 5 bits input per s-box, 2 bits output per s-box
@@ -177,31 +190,13 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->Z = S_GROUP(s2, s1, s6, s5);
         ctx->p = ((s7 >> 1) & 1) * 0xFF;
         ctx->q = (s7 & 1) * 0xFF;
-
-        // require 4 loops per output byte
-        // 2 output bits are a function of the 4 bits of D
-        // xor 2 by 2
-        j = i >> 2;
-
-        if(sb)
-            cb[j] = sb[j];
-        else
-        {
-            s1 = ctx->D ^ (ctx->D >> 1);
-            cb[j] = (cb[j] << 2) ^ (((s1 >> 1) & 2) | (s1 & 1));
-        }
     }
 
-    for(i=0; i<8; i++)
+    for(i = 0; i < 10; i += 1)
     {
         ctx->A[32 + i] = ctx->A[0 + i];
         ctx->B[32 + i] = ctx->B[0 + i];
     }
-
-    ctx->A[40] = ctx->A[8];
-    ctx->A[41] = ctx->A[9];
-    ctx->B[40] = ctx->B[8];
-    ctx->B[41] = ctx->B[9];
 }
 
 //block cypher
