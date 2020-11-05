@@ -22,8 +22,8 @@ typedef struct {
     uint8_t kk[56];
 
     // stream cypher
-    uint8_t A[10];
-    uint8_t B[10];
+    uint8_t A[42];
+    uint8_t B[42];
     uint8_t X;
     uint8_t Y;
     uint8_t Z;
@@ -97,11 +97,11 @@ static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2,
 
 static void stream_init(csa_ctx_t *ctx)
 {
-    memcpy(ctx->A, &ctx->ccw[0], 8);
-    memset(&ctx->A[8], 0, 2);
+    memcpy(&ctx->A[32], &ctx->ccw[0], 8);
+    memset(&ctx->A[40], 0, 2);
 
-    memcpy(ctx->B, &ctx->ccw[8], 8);
-    memset(&ctx->B[8], 0, 2);
+    memcpy(&ctx->B[32], &ctx->ccw[8], 8);
+    memset(&ctx->B[40], 0, 2);
 
     ctx->X = 0;
     ctx->Y = 0;
@@ -129,55 +129,38 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
         // 2 bits per iteration
         for (j = 0; j < 4; j++)
         {
+            uint8_t *A = &ctx->A[31 - i * 4 - j];
+            uint8_t *B = &ctx->B[31 - i * 4 - j];
+
             // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
             // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[A_GROUP(ctx->A[3] >> 0, ctx->A[0] >> 2, ctx->A[5] >> 1, ctx->A[6] >> 3, ctx->A[8] >> 0)];
-            s2 = sbox2[A_GROUP(ctx->A[1] >> 1, ctx->A[2] >> 2, ctx->A[5] >> 3, ctx->A[6] >> 0, ctx->A[8] >> 1)];
-            s3 = sbox3[A_GROUP(ctx->A[0] >> 3, ctx->A[1] >> 0, ctx->A[4] >> 1, ctx->A[4] >> 3, ctx->A[5] >> 2)];
-            s4 = sbox4[A_GROUP(ctx->A[2] >> 3, ctx->A[0] >> 1, ctx->A[1] >> 3, ctx->A[3] >> 2, ctx->A[7] >> 0)];
-            s5 = sbox5[A_GROUP(ctx->A[4] >> 2, ctx->A[3] >> 3, ctx->A[5] >> 0, ctx->A[7] >> 1, ctx->A[8] >> 2)];
-            s6 = sbox6[A_GROUP(ctx->A[2] >> 1, ctx->A[3] >> 1, ctx->A[4] >> 0, ctx->A[6] >> 2, ctx->A[8] >> 3)];
-            s7 = sbox7[A_GROUP(ctx->A[1] >> 2, ctx->A[2] >> 0, ctx->A[6] >> 1, ctx->A[7] >> 2, ctx->A[7] >> 3)];
+            s1 = sbox1[A_GROUP(A[4] >> 0, A[1] >> 2, A[6] >> 1, A[7] >> 3, A[9] >> 0)];
+            s2 = sbox2[A_GROUP(A[2] >> 1, A[3] >> 2, A[6] >> 3, A[7] >> 0, A[9] >> 1)];
+            s3 = sbox3[A_GROUP(A[1] >> 3, A[2] >> 0, A[5] >> 1, A[5] >> 3, A[6] >> 2)];
+            s4 = sbox4[A_GROUP(A[3] >> 3, A[1] >> 1, A[2] >> 3, A[4] >> 2, A[8] >> 0)];
+            s5 = sbox5[A_GROUP(A[5] >> 2, A[4] >> 3, A[6] >> 0, A[8] >> 1, A[9] >> 2)];
+            s6 = sbox6[A_GROUP(A[3] >> 1, A[4] >> 1, A[5] >> 0, A[7] >> 2, A[9] >> 3)];
+            s7 = sbox7[A_GROUP(A[2] >> 2, A[3] >> 0, A[7] >> 1, A[8] >> 2, A[8] >> 3)];
 
             extra_B =
-                B_GROUP(3, ctx->B[2] >> 0, ctx->B[5] >> 1, ctx->B[6] >> 2, ctx->B[8] >> 3) |
-                B_GROUP(2, ctx->B[5] >> 0, ctx->B[7] >> 1, ctx->B[2] >> 3, ctx->B[3] >> 2) |
-                B_GROUP(1, ctx->B[4] >> 3, ctx->B[7] >> 2, ctx->B[3] >> 0, ctx->B[4] >> 1) |
-                B_GROUP(0, ctx->B[8] >> 2, ctx->B[5] >> 3, ctx->B[2] >> 1, ctx->B[7] >> 0) ;
+                B_GROUP(3, B[3] >> 0, B[6] >> 1, B[7] >> 2, B[9] >> 3) |
+                B_GROUP(2, B[6] >> 0, B[8] >> 1, B[3] >> 3, B[4] >> 2) |
+                B_GROUP(1, B[5] >> 3, B[8] >> 2, B[4] >> 0, B[5] >> 1) |
+                B_GROUP(0, B[9] >> 2, B[6] >> 3, B[3] >> 1, B[8] >> 0) ;
 
             // T1 = xor all inputs
-            tmp = ctx->A[9] ^ ctx->X;
+            tmp = A[10] ^ ctx->X;
             if(sb)
                 tmp = tmp ^ ctx->D ^ sb[i * 2 + (j & 1)];
-
-            ctx->A[9]  = ctx->A[8];
-            ctx->A[8]  = ctx->A[7];
-            ctx->A[7]  = ctx->A[6];
-            ctx->A[6]  = ctx->A[5];
-            ctx->A[5]  = ctx->A[4];
-            ctx->A[4]  = ctx->A[3];
-            ctx->A[3]  = ctx->A[2];
-            ctx->A[2]  = ctx->A[1];
-            ctx->A[1]  = ctx->A[0];
-            ctx->A[0]  = tmp;
+            A[0] = tmp;
 
             // T2 =  xor all inputs
-            tmp = ctx->B[6] ^ ctx->B[9] ^ ctx->Y;
+            tmp = B[7] ^ B[10] ^ ctx->Y;
             if(sb)
                 tmp = tmp ^ sb[i * 2 + 1 - (j & 1)];
             if(ctx->p != 0)
                 tmp = nibble_rotate_left(tmp);
-
-            ctx->B[9]  = ctx->B[8];
-            ctx->B[8]  = ctx->B[7];
-            ctx->B[7]  = ctx->B[6];
-            ctx->B[6]  = ctx->B[5];
-            ctx->B[5]  = ctx->B[4];
-            ctx->B[4]  = ctx->B[3];
-            ctx->B[3]  = ctx->B[2];
-            ctx->B[2]  = ctx->B[1];
-            ctx->B[1]  = ctx->B[0];
-            ctx->B[0]  = tmp;
+            B[0]  = tmp;
 
             // T3 = xor all inputs
             ctx->D = ctx->E ^ ctx->Z ^ extra_B;
@@ -215,6 +198,9 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
             }
         }
     }
+
+    memcpy(&ctx->A[32], ctx->A, 10);
+    memcpy(&ctx->B[32], ctx->B, 10);
 }
 
 
