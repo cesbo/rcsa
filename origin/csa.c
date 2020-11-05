@@ -16,7 +16,7 @@
 #include <string.h>
 
 typedef struct {
-    uint8_t ccw[20];
+    uint8_t ccw[16];
 
     // block cypher
     uint8_t kk[56];
@@ -68,6 +68,25 @@ typedef struct {
           BB_AND(BB_RSH(V4, 1), BB_01))))
 
 
+static void nibble_array(uint8_t *dst, const uint8_t *src)
+{
+    for(int i = 0; i < 8; i += 1)
+    {
+        dst[i * 2 + 0] = src[i] >> 4;
+        dst[i * 2 + 1] = src[i] & 0x0F;
+    }
+}
+
+
+static uint8_t nibble_rotate_left(uint8_t value) {
+    static const uint8_t map[] = {
+        0x00, 0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x0e,
+        0x01, 0x03, 0x05, 0x07, 0x09, 0x0b, 0x0d, 0x0f
+    };
+    return map[value];
+}
+
+
 static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
 static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
 static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
@@ -76,48 +95,35 @@ static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1,
 static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
 static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
+static void stream_init(csa_ctx_t *ctx)
+{
+    memcpy(ctx->A, &ctx->ccw[0], 8);
+    memset(&ctx->A[8], 0, 2);
 
-static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
+    memcpy(ctx->B, &ctx->ccw[8], 8);
+    memset(&ctx->B[8], 0, 2);
+
+    ctx->X = 0;
+    ctx->Y = 0;
+    ctx->Z = 0;
+    ctx->D = 0;
+    ctx->E = 0;
+    ctx->F = 0;
+    ctx->r = 0;
+    ctx->p = 0;
+    ctx->q = 0;
+}
+
+static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
 {
     int i,j;
     uint8_t tmp,s1,s2,s3,s4,s5,s6,s7;
 
-    int in1 = 0; // most significant nibble of input byte
-    int in2 = 0; // least significant nibble of input byte
-    int op, extra_B, next_A0, next_B0;
-    uint8_t in[16];
-
-    if(sb)
-    {
-        memcpy(ctx->A, &ctx->ccw[ 0], 10);
-        memcpy(ctx->B, &ctx->ccw[10], 10);
-
-        for(i = 0; i < 8; i += 1)
-        {
-            in[i * 2 + 0] = sb[i] >> 4;
-            in[i * 2 + 1] = sb[i] & 0x0F;
-        }
-
-        ctx->X = 0;
-        ctx->Y = 0;
-        ctx->Z = 0;
-        ctx->D = 0;
-        ctx->E = 0;
-        ctx->F = 0;
-        ctx->r = 0;
-        ctx->p = 0;
-        ctx->q = 0;
-    }
+    int op, extra_B;
 
     // 8 bytes per operation
     for(i = 0; i < 8; i += 1)
     {
-        if(sb)
-        {
-            in1 = in[i * 2 + 0];
-            in2 = in[i * 2 + 1];
-        }
-
         op = 0;
 
         // 2 bits per iteration
@@ -140,22 +146,38 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
                 B_GROUP(0, ctx->B[8] >> 2, ctx->B[5] >> 3, ctx->B[2] >> 1, ctx->B[7] >> 0) ;
 
             // T1 = xor all inputs
-            // in1, in2, D are only used in T1 during initialisation,
-            // not generation
-            next_A0 = ctx->A[9] ^ ctx->X;
+            tmp = ctx->A[9] ^ ctx->X;
             if(sb)
-                next_A0 = next_A0 ^ ctx->D ^ in[i * 2 + (j & 1)];
+                tmp = tmp ^ ctx->D ^ sb[i * 2 + (j & 1)];
+
+            ctx->A[9]  = ctx->A[8];
+            ctx->A[8]  = ctx->A[7];
+            ctx->A[7]  = ctx->A[6];
+            ctx->A[6]  = ctx->A[5];
+            ctx->A[5]  = ctx->A[4];
+            ctx->A[4]  = ctx->A[3];
+            ctx->A[3]  = ctx->A[2];
+            ctx->A[2]  = ctx->A[1];
+            ctx->A[1]  = ctx->A[0];
+            ctx->A[0]  = tmp;
 
             // T2 =  xor all inputs
-            // in1,in2 are only used in T1 during initialisation, not generation
-            // if p=0, use this, if p=1, rotate the result left
-            next_B0 = ctx->B[7 - 1] ^ ctx->B[9] ^ ctx->Y;
+            tmp = ctx->B[6] ^ ctx->B[9] ^ ctx->Y;
             if(sb)
-                next_B0 = next_B0 ^ in[i * 2 + 1 - (j & 1)];
-
-            // if p != 0, rotate left
+                tmp = tmp ^ sb[i * 2 + 1 - (j & 1)];
             if(ctx->p != 0)
-                next_B0 = (next_B0 << 1) | ((next_B0 >> 3) & 1);
+                tmp = nibble_rotate_left(tmp);
+
+            ctx->B[9]  = ctx->B[8];
+            ctx->B[8]  = ctx->B[7];
+            ctx->B[7]  = ctx->B[6];
+            ctx->B[6]  = ctx->B[5];
+            ctx->B[5]  = ctx->B[4];
+            ctx->B[4]  = ctx->B[3];
+            ctx->B[3]  = ctx->B[2];
+            ctx->B[2]  = ctx->B[1];
+            ctx->B[1]  = ctx->B[0];
+            ctx->B[0]  = tmp;
 
             // T3 = xor all inputs
             ctx->D = ctx->E ^ ctx->Z ^ extra_B;
@@ -174,27 +196,7 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             }
             ctx->E = tmp;
 
-            ctx->A[9]  = ctx->A[8];
-            ctx->A[8]  = ctx->A[7];
-            ctx->A[7]  = ctx->A[6];
-            ctx->A[6]  = ctx->A[5];
-            ctx->A[5]  = ctx->A[4];
-            ctx->A[4]  = ctx->A[3];
-            ctx->A[3]  = ctx->A[2];
-            ctx->A[2]  = ctx->A[1];
-            ctx->A[1]  = ctx->A[0];
-            ctx->A[0]  = next_A0;
-
-            ctx->B[9]  = ctx->B[8];
-            ctx->B[8]  = ctx->B[7];
-            ctx->B[7]  = ctx->B[6];
-            ctx->B[6]  = ctx->B[5];
-            ctx->B[5]  = ctx->B[4];
-            ctx->B[4]  = ctx->B[3];
-            ctx->B[3]  = ctx->B[2];
-            ctx->B[2]  = ctx->B[1];
-            ctx->B[1]  = ctx->B[0];
-            ctx->B[0]  = next_B0;
+            // commit
 
             ctx->X = S_GROUP(s4, s3, s2, s1);
             ctx->Y = S_GROUP(s6, s5, s4, s3);
@@ -205,12 +207,13 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
             // xor 2 by 2
-            tmp = ctx->D ^ (ctx->D >> 1);
-            tmp = ((tmp >> 1) & 2) | (tmp & 1);
-            op = (op << 2) | tmp;
+            if(!sb)
+            {
+                tmp = ctx->D ^ (ctx->D >> 1);
+                tmp = ((tmp >> 1) & 2) | (tmp & 1);
+                cb[i] = (cb[i] << 2) | tmp;
+            }
         }
-
-        cb[i] = (sb) ? sb[i] : op;
     }
 }
 
@@ -234,32 +237,8 @@ void key_schedule(csa_ctx_t *ctx, uint8_t *cw) {
     // load first 32 bits of CK into A[0]..A[7]
     // load last  32 bits of CK into B[0]..B[7]
     // all other regs = 0
-    for(i=0; i<8; i++) {
-        kb[56 + i] = cw[i];
-    }
-
-    ctx->ccw[0] = cw[0] >> 4;
-    ctx->ccw[1] = cw[0] & 0x0F;
-    ctx->ccw[2] = cw[1] >> 4;
-    ctx->ccw[3] = cw[1] & 0x0F;
-    ctx->ccw[4] = cw[2] >> 4;
-    ctx->ccw[5] = cw[2] & 0x0F;
-    ctx->ccw[6] = cw[3] >> 4;
-    ctx->ccw[7] = cw[3] & 0x0F;
-    ctx->ccw[8] = 0;
-    ctx->ccw[9] = 0;
-
-    ctx->ccw[10] = cw[4] >> 4;
-    ctx->ccw[11] = cw[4] & 0x0F;
-    ctx->ccw[12] = cw[5] >> 4;
-    ctx->ccw[13] = cw[5] & 0x0F;
-    ctx->ccw[14] = cw[6] >> 4;
-    ctx->ccw[15] = cw[6] & 0x0F;
-    ctx->ccw[16] = cw[7] >> 4;
-    ctx->ccw[17] = cw[7] & 0x0F;
-    ctx->ccw[18] = 0;
-    ctx->ccw[19] = 0;
-
+    memcpy(&kb[56], cw, 8);
+    nibble_array(ctx->ccw, cw);
 
     // calculate kb[6] .. kb[1]
     for(i=48; i>=0; i-=8)
@@ -415,22 +394,27 @@ unsigned char expected1[0x100] = {
 };
 
 
-void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
+void decrypt(csa_ctx_t *ctx, uint8_t *encrypted, uint8_t *decrypted)
 {
     int i,j;
-    unsigned char stream[8];
-    unsigned char ib[8];
-    unsigned char block[8];
+    uint8_t stream[8];
+    uint8_t ib[8];
+    uint8_t block[8];
+    uint8_t sb[16];
 
     // 1st 4 bytes not encrypted
     memcpy(decrypted, encrypted, 4);
-
     encrypted += 4;
     decrypted += 4;
 
     // 1st 8 bytes of initialisation
     memcpy(ib, encrypted, 8);
-    stream_cypher(ctx, encrypted, ib);
+
+    // nibble of input byte
+    nibble_array(sb, ib);
+
+    stream_init(ctx);
+    stream_cypher(ctx, sb, ib);
 
     for(j = 0; j < 22; j += 1)
     {
