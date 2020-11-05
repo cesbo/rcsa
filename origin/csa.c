@@ -84,6 +84,17 @@ static inline uint8_t nibble_rotate_left(uint8_t value) {
 }
 
 
+static inline void xor_all_inputs(csa_ctx_t *csa, const uint8_t *B)
+{
+    ctx->D =
+        B_GROUP(3, B[3] >> 0, B[6] >> 1, B[7] >> 2, B[9] >> 3) |
+        B_GROUP(2, B[6] >> 0, B[8] >> 1, B[3] >> 3, B[4] >> 2) |
+        B_GROUP(1, B[5] >> 3, B[8] >> 2, B[4] >> 0, B[5] >> 1) |
+        B_GROUP(0, B[9] >> 2, B[6] >> 3, B[3] >> 1, B[8] >> 0) ;
+    ctx->D ^= ctx->E ^ ctx->Z;
+}
+
+
 static uint8_t sbox1[0x20] = {2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0};
 static uint8_t sbox2[0x20] = {3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1};
 static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1};
@@ -148,12 +159,7 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
                 B[0] = nibble_rotate_left(B[0]);
 
             // T3 = xor all inputs
-            tmp =
-                B_GROUP(3, B[3] >> 0, B[6] >> 1, B[7] >> 2, B[9] >> 3) |
-                B_GROUP(2, B[6] >> 0, B[8] >> 1, B[3] >> 3, B[4] >> 2) |
-                B_GROUP(1, B[5] >> 3, B[8] >> 2, B[4] >> 0, B[5] >> 1) |
-                B_GROUP(0, B[9] >> 2, B[6] >> 3, B[3] >> 1, B[8] >> 0) ;
-            ctx->D = ctx->E ^ ctx->Z ^ tmp;
+            xor_all_inputs(ctx, B);
 
             // T4 = sum, carry of Z + E + r
             tmp = ctx->F;
