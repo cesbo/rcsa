@@ -458,13 +458,11 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
     // 1st 4 bytes not encrypted
     for(i=0; i<4; i++) decrypted[i] = encrypted[i];
 
-printf("%s:%d\n", __func__, __LINE__);
     // 1st 8 bytes of initialisation
     stream_cypher(ctx, &encrypted[4], ib);
 
     for(j=1; j<STEPS; j++)
     {
-printf("%s:%d j=%d\n", __func__, __LINE__, j);
         block_decypher(ctx, ib, block);
         stream_cypher(ctx, NULL, stream);
         // xor sb x stream
@@ -501,12 +499,12 @@ int main(void)
 
     decrypt(&ctx, encrypted1, decrypted1); compare("decryption", decrypted1, expected1);
 
-//    struct timeval tvs, tve;
-//    gettimeofday(&tvs,NULL);
-//    for(int z=0; z<TS_PKTS_FOR_TEST; z++) decrypt(&ctx, encrypted1, decrypted1);
-//    gettimeofday(&tve,NULL);
-//    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
-//    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
+    struct timeval tvs, tve;
+    gettimeofday(&tvs,NULL);
+    for(int z=0; z<TS_PKTS_FOR_TEST; z++) decrypt(&ctx, encrypted1, decrypted1);
+    gettimeofday(&tve,NULL);
+    fprintf(stderr,"speed=%f Mbit/s\n",(184*TS_PKTS_FOR_TEST*8)/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec))/1000000);
+    fprintf(stderr,"speed=%f pkts/s\n",TS_PKTS_FOR_TEST/((tve.tv_sec-tvs.tv_sec)+1e-6*(tve.tv_usec-tvs.tv_usec)));
 
     return 0;
 }
