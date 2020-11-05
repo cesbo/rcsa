@@ -82,11 +82,16 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
     if(sb)
     {
+        memcpy(cb, sb, 8);
+
+        memcpy(&ctx->A[32], &ctx->ccw[0], 8);
+        memcpy(&ctx->B[32], &ctx->ccw[8], 8);
+
+        memset(&ctx->A[40], 0, 2);
+        memset(&ctx->B[40], 0, 2);
+
         for(i = 0, j = 28; i < 8; i += 1, j -= 4)
         {
-            ctx->A[32 + i] = ctx->ccw[0 + i];
-            ctx->B[32 + i] = ctx->ccw[8 + i];
-
             s1 = sb[i] >> 4;
             s2 = sb[i] & 0x0F;
 
@@ -101,14 +106,7 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
 
             ctx->B[j + 0] = s1;
             ctx->B[j + 1] = s2;
-
-            cb[i] = sb[i];
         }
-
-        ctx->A[40] = 0;
-        ctx->A[41] = 0;
-        ctx->B[40] = 0;
-        ctx->B[41] = 0;
 
         ctx->X = 0;
         ctx->Y = 0;
@@ -139,8 +137,8 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             ctx->B[j] = ctx->Y;
         }
 
-        // if p=1, rotate left
-        if(ctx->p)
+        // if p!=0, rotate left
+        if(ctx->p != 0)
             ctx->B[j] = ((ctx->B[j] << 1) | ((ctx->B[j] >> 3) & 1)) & 0x0F;
 
         // T3
@@ -159,7 +157,7 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
             s1 = ((s1 >> 1) & 2) | (s1 & 1);
             s2 = i >> 2;
 
-            cb[s2] = (cb[s2] << 2) ^ s1;
+            cb[s2] = (cb[s2] << 2) | s1;
         }
 
         // T4
@@ -188,15 +186,12 @@ static void stream_cypher(csa_ctx_t *ctx, uint8_t *sb, uint8_t *cb)
         ctx->X = S_GROUP(s4, s3, s2, s1);
         ctx->Y = S_GROUP(s6, s5, s4, s3);
         ctx->Z = S_GROUP(s2, s1, s6, s5);
-        ctx->p = ((s7 >> 1) & 1) * 0xFF;
-        ctx->q = (s7 & 1) * 0xFF;
+        ctx->p = s7 & 2;
+        ctx->q = s7 & 1;
     }
 
-    for(i = 0; i < 10; i += 1)
-    {
-        ctx->A[32 + i] = ctx->A[0 + i];
-        ctx->B[32 + i] = ctx->B[0 + i];
-    }
+    memcpy(&ctx->A[32], &ctx->A[0], 10);
+    memcpy(&ctx->B[32], &ctx->B[0], 10);
 }
 
 //block cypher
@@ -308,7 +303,7 @@ static void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
     uint8_t sbox_out;
     uint8_t N, T[8];
 
-    for(i=0; i<8; i++) T[i] = ib[i];
+    memcpy(T, ib, 8);
 
     for(i=55; i>=0; i--)
     {
@@ -325,7 +320,7 @@ static void block_decypher(csa_ctx_t *ctx, uint8_t *ib, uint8_t *bd)
         T[0] = sbox_out;
     }
 
-    for(i=0; i<8; i++) bd[i] = T[i];
+    memcpy(bd, T, 8);
 }
 
 //
@@ -451,25 +446,38 @@ void decrypt(csa_ctx_t *ctx, unsigned char *encrypted, unsigned char *decrypted)
     unsigned char block[8];
 
     // 1st 4 bytes not encrypted
-    for(i=0; i<4; i++) decrypted[i] = encrypted[i];
+    memcpy(decrypted, encrypted, 4);
+
+    encrypted += 4;
+    decrypted += 4;
 
     // 1st 8 bytes of initialisation
-    stream_cypher(ctx, &encrypted[4], ib);
+    stream_cypher(ctx, encrypted, ib);
 
-    for(j=1; j<STEPS; j++)
+    for(j = 1; j < STEPS; j += 1)
     {
         block_decypher(ctx, ib, block);
         stream_cypher(ctx, NULL, stream);
-        // xor sb x stream
-        for(i=0; i<8; i++)  ib[i] = encrypted[4+8*j+i] ^ stream[i];
-        // xor ib x block
-        for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
+
+        encrypted += 8;
+
+        for(i = 0; i < 8; i += 1)
+        {
+            // xor sb x stream
+            ib[i] = encrypted[i] ^ stream[i];
+
+            // xor ib x block
+            decrypted[i] = ib[i] ^ block[i];
+        }
+
+        decrypted += 8;
     }
 
     // last block - sb[N+1] = IV(initialisation vetor)(=0)
     block_decypher(ctx, ib, block);
-    for(i=0; i<8; i++)  ib[i] = 0;
-    for(i=0; i<8; i++)  decrypted[4+8*(j-1)+i] = ib[i] ^ block[i];
+
+    memset(ib, 0, 8);
+    memcpy(decrypted, block, 8);
 }
 
 void compare(const char *name, const uint8_t *b1, const uint8_t *b2)
