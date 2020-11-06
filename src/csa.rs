@@ -278,39 +278,36 @@ impl Default for Csa {
 
 impl Csa {
     pub fn set_cw(&mut self, cw: &[u8]) {
-        let mut newbit: [u8; 64] = unsafe { MaybeUninit::uninit().assume_init() };
         let mut kb: [u8; 64] = unsafe { MaybeUninit::uninit().assume_init() };
 
-        for i in 0 .. 8 {
-            kb[56 + i] = cw[i];
-        }
+        kb[56 .. 64].copy_from_slice(&cw[0 .. 8]);
 
         nibble_array(&mut self.ccw, cw);
 
         for i in (0 ..= 48).rev().step_by(8) {
             for j in (0 ..= 56).step_by(8) {
                 let v = kb[8 + i + (j >> 3)];
-                newbit[KEY_PERM[j + 0]] = (v >> 7) & 1;
-                newbit[KEY_PERM[j + 1]] = (v >> 6) & 1;
-                newbit[KEY_PERM[j + 2]] = (v >> 5) & 1;
-                newbit[KEY_PERM[j + 3]] = (v >> 4) & 1;
-                newbit[KEY_PERM[j + 4]] = (v >> 3) & 1;
-                newbit[KEY_PERM[j + 5]] = (v >> 2) & 1;
-                newbit[KEY_PERM[j + 6]] = (v >> 1) & 1;
-                newbit[KEY_PERM[j + 7]] = (v     ) & 1;
+                self.t[KEY_PERM[j + 0]] = (v >> 7) & 1;
+                self.t[KEY_PERM[j + 1]] = (v >> 6) & 1;
+                self.t[KEY_PERM[j + 2]] = (v >> 5) & 1;
+                self.t[KEY_PERM[j + 3]] = (v >> 4) & 1;
+                self.t[KEY_PERM[j + 4]] = (v >> 3) & 1;
+                self.t[KEY_PERM[j + 5]] = (v >> 2) & 1;
+                self.t[KEY_PERM[j + 6]] = (v >> 1) & 1;
+                self.t[KEY_PERM[j + 7]] = (v     ) & 1;
             }
 
             for j in (0 ..= 56).step_by(8) {
                 let v = i + (j >> 3);
                 kb[v] =
-                    newbit[j + 0] << 7 |
-                    newbit[j + 1] << 6 |
-                    newbit[j + 2] << 5 |
-                    newbit[j + 3] << 4 |
-                    newbit[j + 4] << 3 |
-                    newbit[j + 5] << 2 |
-                    newbit[j + 6] << 1 |
-                    newbit[j + 7]      ;
+                    self.t[j + 0] << 7 |
+                    self.t[j + 1] << 6 |
+                    self.t[j + 2] << 5 |
+                    self.t[j + 3] << 4 |
+                    self.t[j + 4] << 3 |
+                    self.t[j + 5] << 2 |
+                    self.t[j + 6] << 1 |
+                    self.t[j + 7]      ;
                 self.kk[v] = kb[8 + v] ^ (i >> 3) as u8;
             }
         }
@@ -319,9 +316,7 @@ impl Csa {
     fn block_decypher(&mut self, ib: &[u8]) {
         let mut sbox_out;
 
-        for i in 0 .. 8 {
-            self.t[56 + i] = ib[i];
-        }
+        self.t[56 .. 64].copy_from_slice(&ib[0 .. 8]);
 
         for i in (0 ..= 55).rev() {
             sbox_out = self.kk[i] ^ self.t[i + 7];
@@ -338,10 +333,8 @@ impl Csa {
     }
 
     fn stream_init(&mut self) {
-        for i in 0 .. 8 {
-            self.a[32 + i] = self.ccw[i    ];
-            self.b[32 + i] = self.ccw[i + 8];
-        }
+        self.a[32 .. 40].copy_from_slice(&self.ccw[.. 8]);
+        self.b[32 .. 40].copy_from_slice(&self.ccw[8 ..]);
 
         self.a[40] = 0;
         self.a[41] = 0;
@@ -479,14 +472,14 @@ impl Csa {
                     self.a[skip + 10],
                     self.x,
                     self.d,
-                    sb[i * 2 + (j & 1)]
+                    (sb[i] >> ((1 - j & 1) << 2)) & 0x0F
                 );
 
                 self.b[skip] = bb_xor!(
                     self.b[skip + 10],
                     self.y,
                     self.b[skip + 7],
-                    sb[i * 2 + 1 - (j & 1)]
+                    (sb[i] >> ((j & 1) << 2)) & 0x0F
                 );
 
                 self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left(self.b[skip]));
@@ -496,10 +489,8 @@ impl Csa {
             }
         }
 
-        for i in 0 .. 10 {
-            self.a[32 + i] = self.a[i];
-            self.b[32 + i] = self.b[i];
-        }
+        self.a.copy_within(0 .. 10, 32);
+        self.b.copy_within(0 .. 10, 32);
     }
 
     fn stream_cypher(&mut self, cb: &mut [u8]) {
@@ -531,28 +522,18 @@ impl Csa {
             }
         }
 
-        for i in 0 .. 10 {
-            self.a[32 + i] = self.a[i];
-            self.b[32 + i] = self.b[i];
-        }
+        self.a.copy_within(0 .. 10, 32);
+        self.b.copy_within(0 .. 10, 32);
     }
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
         let mut block: [u8; 8] = unsafe { MaybeUninit::uninit().assume_init() };
-        let mut sb: [u8; 16] = unsafe { MaybeUninit::uninit().assume_init() };
 
-        for i in 0 .. 4 {
-            dest[i] = src[i];
-        }
-
-        for i in 0 .. 8 {
-            block[i] = src[4 + i];
-        }
-
-        nibble_array(&mut sb, &block);
+        dest[0 .. 4].copy_from_slice(&src[0 .. 4]);
+        block[0 .. 8].copy_from_slice(&src[4 .. 12]);
 
         self.stream_init();
-        self.stream_cypher_init(&sb);
+        self.stream_cypher_init(&block);
 
         for i in 0 .. 22 {
             self.block_decypher(&block);
@@ -566,8 +547,6 @@ impl Csa {
 
         self.block_decypher(&block);
 
-        for i in 0 .. 8 {
-            dest[180 + i] = self.t[i];
-        }
+        dest[180 .. 188].copy_from_slice(&self.t[.. 8]);
     }
 }
