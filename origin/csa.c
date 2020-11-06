@@ -47,20 +47,48 @@ typedef struct {
 #define BB_LSH(A, B) ((A) << (B))
 #define BB_RSH(A, B) ((A) >> (B))
 
+#define BB_IF(COND, A, B) BB_XOR(A, BB_AND(COND, BB_XOR(A, B)))
+
+#define BB_XOR_3(A, B, C) BB_XOR(A, BB_XOR(B, C))
+#define BB_XOR_4(A, B, C, D) BB_XOR(A, BB_XOR_3(B, C, D))
+
 #define BIT_LSH(V, S) BB_LSH(BB_AND(V, BB_01), S)
 
-#define A_GROUP(V1, V2, V3, V4, V5)                 \
+#define A_GROUP(V1, V2, V3, V4, V5)                (\
     BB_OR(BIT_LSH(V1, 4),                           \
     BB_OR(BIT_LSH(V2, 3),                           \
     BB_OR(BIT_LSH(V3, 2),                           \
     BB_OR(BIT_LSH(V4, 1),                           \
-          BB_AND(V5, BB_01)))))
+          BB_AND(V5, BB_01)))))                     \
+)
 
-#define B_GROUP(S, V1, V2, V3, V4)                  \
-    BB_XOR(BIT_LSH(V1, S),                          \
-    BB_XOR(BIT_LSH(V2, S),                          \
-    BB_XOR(BIT_LSH(V3, S),                          \
-           BIT_LSH(V4, S))))
+#define A_GROUP_1(A) A_GROUP(A[4] >> 0, A[1] >> 2, A[6] >> 1, A[7] >> 3, A[9] >> 0)
+#define A_GROUP_2(A) A_GROUP(A[2] >> 1, A[3] >> 2, A[6] >> 3, A[7] >> 0, A[9] >> 1)
+#define A_GROUP_3(A) A_GROUP(A[1] >> 3, A[2] >> 0, A[5] >> 1, A[5] >> 3, A[6] >> 2)
+#define A_GROUP_4(A) A_GROUP(A[3] >> 3, A[1] >> 1, A[2] >> 3, A[4] >> 2, A[8] >> 0)
+#define A_GROUP_5(A) A_GROUP(A[5] >> 2, A[4] >> 3, A[6] >> 0, A[8] >> 1, A[9] >> 2)
+#define A_GROUP_6(A) A_GROUP(A[3] >> 1, A[4] >> 1, A[5] >> 0, A[7] >> 2, A[9] >> 3)
+#define A_GROUP_7(A) A_GROUP(A[2] >> 2, A[3] >> 0, A[7] >> 1, A[8] >> 2, A[8] >> 3)
+
+#define B_GROUP(S, V1, S1, V2, S2, V3, S3, V4, S4) (\
+    BB_XOR(BIT_LSH(BB_RSH(V1, S1), S),              \
+    BB_XOR(BIT_LSH(BB_RSH(V2, S2), S),              \
+    BB_XOR(BIT_LSH(BB_RSH(V3, S3), S),              \
+           BIT_LSH(BB_RSH(V4, S4), S))))            \
+)
+
+#define B_GROUP_0(B) B_GROUP(0, B[9], 2, B[6], 3, B[3], 1, B[8], 0)
+#define B_GROUP_1(B) B_GROUP(1, B[5], 3, B[8], 2, B[4], 0, B[5], 1)
+#define B_GROUP_2(B) B_GROUP(2, B[6], 0, B[8], 1, B[3], 3, B[4], 2)
+#define B_GROUP_3(B) B_GROUP(3, B[3], 0, B[6], 1, B[7], 2, B[9], 3)
+
+#define B_GROUP_ALL(B)                             (\
+    BB_OR(B_GROUP_0(B),                             \
+    BB_OR(B_GROUP_1(B),                             \
+    BB_OR(B_GROUP_2(B),                             \
+          B_GROUP_3(B))))                           \
+)
+
 
 #define S_GROUP(V1, V2, V3, V4)                     \
     BB_OR(BIT_LSH(V1, 3),                           \
@@ -84,14 +112,26 @@ static inline uint8_t nibble_rotate_left(uint8_t value) {
 }
 
 
-static inline void xor_all_inputs(csa_ctx_t *csa, const uint8_t *B)
+static inline void b_group_xor(csa_ctx_t *ctx, const uint8_t *B)
 {
-    ctx->D =
-        B_GROUP(3, B[3] >> 0, B[6] >> 1, B[7] >> 2, B[9] >> 3) |
-        B_GROUP(2, B[6] >> 0, B[8] >> 1, B[3] >> 3, B[4] >> 2) |
-        B_GROUP(1, B[5] >> 3, B[8] >> 2, B[4] >> 0, B[5] >> 1) |
-        B_GROUP(0, B[9] >> 2, B[6] >> 3, B[3] >> 1, B[8] >> 0) ;
-    ctx->D ^= ctx->E ^ ctx->Z;
+    uint8_t tmp, a, b;
+
+    tmp = B_GROUP_ALL(B);
+    ctx->D = BB_XOR_3(ctx->E, ctx->Z, tmp);
+
+    // T4 = sum, carry of Z + E + r
+    tmp = ctx->F;
+
+    a = ctx->E;
+    b = ctx->Z + ctx->E + ctx->r;
+    ctx->F = BB_IF(ctx->q, a, b);
+
+    a = ctx->r;
+    b = BB_AND(BB_RSH(ctx->F, 4), BB_01);
+    ctx->r = BB_IF(ctx->q, a, b);
+
+    ctx->F = BB_AND(ctx->F, BB_0F);
+    ctx->E = tmp;
 }
 
 
@@ -101,12 +141,54 @@ static uint8_t sbox3[0x20] = {2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2,
 static uint8_t sbox4[0x20] = {3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1};
 static uint8_t sbox5[0x20] = {2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2};
 static uint8_t sbox6[0x20] = {0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0};
-static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
 
 
-static void stream_init(csa_ctx_t *ctx)
+// static uint8_t sbox7[0x20] = {0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2};
+static uint8_t sbox7p[0x20] = {
+    0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+    0xFF, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0x00,
+    0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF,
+    0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0xFF,
+};
+
+
+static uint8_t sbox7q[0x20] = {
+    0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF,
+    0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF,
+    0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00,
+    0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00,
+};
+
+
+static inline void a_group_xor(csa_ctx_t *ctx, const uint8_t *A)
 {
-    int i;
+    uint8_t s1, s2, s3, s4, s5, s6;
+
+    // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
+    // 5 bits input per s-box, 2 bits output per s-box
+    s1 = sbox1[A_GROUP_1(A)];
+    s2 = sbox2[A_GROUP_2(A)];
+    s3 = sbox3[A_GROUP_3(A)];
+    s4 = sbox4[A_GROUP_4(A)];
+    s5 = sbox5[A_GROUP_5(A)];
+    s6 = sbox6[A_GROUP_6(A)];
+
+    ctx->X = S_GROUP(s4, s3, s2, s1);
+    ctx->Y = S_GROUP(s6, s5, s4, s3);
+    ctx->Z = S_GROUP(s2, s1, s6, s5);
+
+    uint8_t tmp = A_GROUP_7(A);
+    ctx->p = sbox7p[tmp];
+    ctx->q = sbox7q[tmp];
+}
+
+
+static void stream_cypher_init(csa_ctx_t *ctx, const uint8_t *sb)
+{
+    int i, j;
+
+    uint8_t *A = &ctx->A[31];
+    uint8_t *B = &ctx->B[31];
 
     for(i = 0; i < 8; i += 1)
     {
@@ -129,13 +211,46 @@ static void stream_init(csa_ctx_t *ctx)
     ctx->r = 0;
     ctx->p = 0;
     ctx->q = 0;
+
+
+    // 8 bytes per operation
+    for(i = 0; i < 8; i += 1)
+    {
+        // 2 bits per iteration
+        for (j = 0; j < 4; j++)
+        {
+            // T1 = xor all inputs
+            A[0] = BB_XOR_4(A[10], ctx->X, ctx->D, sb[(j & 1)]);
+
+            // T2 =  xor all inputs
+            B[0] = BB_XOR_4(B[7], B[10], ctx->Y, sb[1 - (j & 1)]);
+
+            // Rotate left if ctx->p != 0
+            B[0] = BB_IF(ctx->p, B[0], nibble_rotate_left(B[0]));
+
+            // T3 = xor all inputs
+            b_group_xor(ctx, B);
+            a_group_xor(ctx, A);
+
+            A -= 1;
+            B -= 1;
+        }
+
+        sb += 2;
+    }
+
+    for(i = 0; i < 10; i += 1)
+    {
+        ctx->A[32 + i] = ctx->A[i];
+        ctx->B[32 + i] = ctx->B[i];
+    }
 }
 
 
-static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
+static void stream_cypher(csa_ctx_t *ctx, uint8_t *cb)
 {
     int i,j;
-    uint8_t tmp,s1,s2,s3,s4,s5,s6,s7;
+    uint8_t tmp;
 
     uint8_t *A = &ctx->A[31];
     uint8_t *B = &ctx->B[31];
@@ -147,60 +262,24 @@ static void stream_cypher(csa_ctx_t *ctx, const uint8_t *sb, uint8_t *cb)
         for (j = 0; j < 4; j++)
         {
             // T1 = xor all inputs
-            A[0] = A[10] ^ ctx->X;
-            if(sb)
-                A[0] ^= ctx->D ^ sb[i * 2 + (j & 1)];
+            A[0] = BB_XOR(A[10], ctx->X);
 
             // T2 =  xor all inputs
-            B[0] = B[7] ^ B[10] ^ ctx->Y;
-            if(sb)
-                B[0] ^= sb[i * 2 + 1 - (j & 1)];
-            if(ctx->p != 0)
-                B[0] = nibble_rotate_left(B[0]);
+            B[0] = BB_XOR_3(B[7], B[10], ctx->Y);
+
+            // Rotate left if ctx->p != 0
+            B[0] = BB_IF(ctx->p, B[0], nibble_rotate_left(B[0]));
 
             // T3 = xor all inputs
-            xor_all_inputs(ctx, B);
-
-            // T4 = sum, carry of Z + E + r
-            tmp = ctx->F;
-            if(ctx->q)
-            {
-                ctx->F = ctx->Z + ctx->E + ctx->r;
-                ctx->r = (ctx->F >> 4) & 1;
-                ctx->F = ctx->F & 0x0F;
-            }
-            else
-            {
-                ctx->F = ctx->E;
-            }
-            ctx->E = tmp;
-
-            // from A[1]..A[10], 35 bits are selected as inputs to 7 s-boxes
-            // 5 bits input per s-box, 2 bits output per s-box
-            s1 = sbox1[A_GROUP(A[4] >> 0, A[1] >> 2, A[6] >> 1, A[7] >> 3, A[9] >> 0)];
-            s2 = sbox2[A_GROUP(A[2] >> 1, A[3] >> 2, A[6] >> 3, A[7] >> 0, A[9] >> 1)];
-            s3 = sbox3[A_GROUP(A[1] >> 3, A[2] >> 0, A[5] >> 1, A[5] >> 3, A[6] >> 2)];
-            s4 = sbox4[A_GROUP(A[3] >> 3, A[1] >> 1, A[2] >> 3, A[4] >> 2, A[8] >> 0)];
-            s5 = sbox5[A_GROUP(A[5] >> 2, A[4] >> 3, A[6] >> 0, A[8] >> 1, A[9] >> 2)];
-            s6 = sbox6[A_GROUP(A[3] >> 1, A[4] >> 1, A[5] >> 0, A[7] >> 2, A[9] >> 3)];
-            s7 = sbox7[A_GROUP(A[2] >> 2, A[3] >> 0, A[7] >> 1, A[8] >> 2, A[8] >> 3)];
-
-            ctx->X = S_GROUP(s4, s3, s2, s1);
-            ctx->Y = S_GROUP(s6, s5, s4, s3);
-            ctx->Z = S_GROUP(s2, s1, s6, s5);
-
-            ctx->p = (s7 & 2) >> 1;
-            ctx->q = s7 & 1;
+            b_group_xor(ctx, B);
+            a_group_xor(ctx, A);
 
             // require 4 loops per output byte
             // 2 output bits are a function of the 4 bits of D
             // xor 2 by 2
-            if(!sb)
-            {
-                tmp = ctx->D ^ (ctx->D >> 1);
-                tmp = ((tmp >> 1) & 2) | (tmp & 1);
-                cb[i] = (cb[i] << 2) | tmp;
-            }
+            tmp = BB_XOR(ctx->D, BB_RSH(ctx->D, 1));
+            tmp = ((tmp >> 1) & 2) | (tmp & 1);
+            cb[i] = (cb[i] << 2) | tmp;
 
             A -= 1;
             B -= 1;
@@ -406,13 +485,12 @@ void decrypt(csa_ctx_t *ctx, uint8_t *encrypted, uint8_t *decrypted)
     // nibble of input byte
     nibble_array(sb, block);
 
-    stream_init(ctx);
-    stream_cypher(ctx, sb, block);
+    stream_cypher_init(ctx, sb);
 
     for(j = 0; j < 22; j += 1)
     {
         block_decypher(ctx, block);
-        stream_cypher(ctx, NULL, block);
+        stream_cypher(ctx, block);
 
         encrypted += 8;
 
