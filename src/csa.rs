@@ -134,6 +134,21 @@ macro_rules! bb_add {
 }
 
 
+macro_rules! bb_and {
+    ($v1: expr, $v2: expr) => {
+        $v1 & $v2
+    };
+
+    ($v1: expr, $v2: expr, $v3: expr) => {
+        $v1 & $v2 & $v3
+    };
+
+    ($v1: expr, $v2: expr, $v3: expr, $v4: expr) => {
+        $v1 & $v2 & $v3 & $v4
+    };
+}
+
+
 macro_rules! bb_or {
     ($v1: expr, $v2: expr) => {
         $v1 | $v2
@@ -175,6 +190,13 @@ macro_rules! bb_bit {
 
     ($v: expr, $bit: expr) => {
         bb_bit!($v >> $bit)
+    };
+}
+
+
+macro_rules! bb_if {
+    ($cond: expr, $a: expr, $b: expr) => {
+        bb_xor!($a, bb_and!($cond, bb_xor!($a, $b)))
     };
 }
 
@@ -295,18 +317,16 @@ impl Csa {
     }
 
     fn block_decypher(&mut self, ib: &[u8]) {
-        let mut t6: u8 = ib[6];
-        let mut sbox_out: u8;
+        let mut sbox_out;
 
         for i in 0 .. 8 {
             self.t[56 + i] = ib[i];
         }
 
         for i in (0 ..= 55).rev() {
-            t6 = t6 ^ self.kk[i];
-            sbox_out = BLOCK_SBOX[t6 as usize];
-            t6 = self.t[i + 6] ^ BLOCK_PERM[sbox_out as usize];
-            self.t[i + 6] = t6;
+            sbox_out = self.kk[i] ^ self.t[i + 7];
+            sbox_out = BLOCK_SBOX[sbox_out as usize];
+            self.t[i + 6] = self.t[i + 6] ^ BLOCK_PERM[sbox_out as usize];
 
             sbox_out = sbox_out ^ self.t[i + 8];
 
@@ -323,10 +343,10 @@ impl Csa {
             self.b[32 + i] = self.ccw[i + 8];
         }
 
-        for i in 0 .. 2 {
-            self.a[40 + i] = 0;
-            self.b[40 + i] = 0;
-        }
+        self.a[40] = 0;
+        self.a[41] = 0;
+        self.b[40] = 0;
+        self.b[41] = 0;
 
         self.x = 0;
         self.y = 0;
@@ -339,6 +359,7 @@ impl Csa {
         self.q = 0;
     }
 
+    #[inline]
     fn b_group_xor(&mut self, skip: usize) {
         let tmp = bb_or!(
             bb_xor!(
@@ -370,16 +391,15 @@ impl Csa {
         self.d = bb_xor!(self.e, self.z, tmp);
 
         let tmp = self.f;
-        if self.q != 0 {
-            self.f = self.z + self.e + self.r;
-            self.r = self.f >> 4;
-            self.f = self.f & 0x0F;
-        } else {
-            self.f = self.e;
-        }
+
+        self.f = bb_if!(self.q, self.e, bb_add!(self.z, self.e, self.r));
+        self.r = bb_if!(self.q, self.r, self.f >> 4);
+
+        self.f = self.f & 0x0F;
         self.e = tmp;
     }
 
+    #[inline]
     fn a_group_xor(&mut self, skip: usize) {
         let s1 = bb_or!(
             bb_bit!(self.a[skip + 4]   ) << 4,
@@ -469,9 +489,7 @@ impl Csa {
                     sb[i * 2 + 1 - (j & 1)]
                 );
 
-                if self.p != 0 {
-                    self.b[skip] = nibble_rotate_left(self.b[skip]);
-                }
+                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left(self.b[skip]));
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);
@@ -502,9 +520,7 @@ impl Csa {
                     self.b[skip + 7]
                 );
 
-                if self.p != 0 {
-                    self.b[skip] = nibble_rotate_left(self.b[skip]);
-                }
+                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left(self.b[skip]));
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);

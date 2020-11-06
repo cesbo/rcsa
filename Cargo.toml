@@ -4,4 +4,11 @@ version = "0.1.0"
 authors = ["Andrey Dyldin <and@cesbo.com>"]
 edition = "2018"
 
+
 [dependencies]
+
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true
