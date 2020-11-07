@@ -163,8 +163,8 @@ pub struct Csa {
     y: Nibble,
     z: Nibble,
     d: Nibble,
-    e: u8,
-    f: u8,
+    e: Nibble,
+    f: Nibble,
     r: u8,
     p: u8,
     q: u8,
@@ -186,8 +186,8 @@ impl Default for Csa {
             y: Nibble::X00,
             z: Nibble::X00,
             d: Nibble::X00,
-            e: 0,
-            f: 0,
+            e: Nibble::X00,
+            f: Nibble::X00,
             r: 0,
             p: 0,
             q: 0,
@@ -243,8 +243,8 @@ impl Csa {
         self.y = Nibble::X00;
         self.z = Nibble::X00;
         self.d = Nibble::X00;
-        self.e = 0;
-        self.f = 0;
+        self.e = Nibble::X00;
+        self.f = Nibble::X00;
         self.r = 0;
         self.p = 0;
         self.q = 0;
@@ -278,15 +278,21 @@ impl Csa {
             ),
         );
 
-        self.d = Nibble::from(self.e) ^ self.z ^ tmp;
+        self.d = self.e ^ self.z ^ tmp;
 
         let tmp = self.f;
         if self.q != 0 {
             // TODO: replace
             let z = (self.z.3 << 3) | (self.z.2 << 2) | (self.z.1 << 1) | self.z.0;
-            self.f = z + self.e + self.r;
-            self.r = self.f >> 4;
-            self.f = self.f & 0x0F;
+            let e = (self.e.3 << 3) | (self.e.2 << 2) | (self.e.1 << 1) | self.e.0;
+            let f = z + e + self.r;
+            self.r = f >> 4;
+            self.f = Nibble::new(
+                f & 0x01,
+                (f >> 1) & 0x01,
+                (f >> 2) & 0x01,
+                (f >> 3) & 0x01,
+            );
         } else {
             self.f = self.e;
         }
