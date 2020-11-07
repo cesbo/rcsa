@@ -148,29 +148,6 @@ macro_rules! bb_xor {
 }
 
 
-macro_rules! bb_bit {
-    ($v: expr) => {
-        $v & 0x01
-    };
-
-    ($v: expr, $bit: expr) => {
-        bb_bit!($v >> $bit)
-    };
-}
-
-
-macro_rules! s_group {
-    ($v1: expr, $v2: expr, $v3: expr, $v4: expr) => {
-        bb_or!(
-            bb_bit!($v1   ) << 3,
-            bb_bit!($v2   ) << 2,
-            bb_bit!($v3, 1) << 1,
-            bb_bit!($v4, 1)
-        )
-    };
-}
-
-
 #[derive(Debug)]
 pub struct Csa {
     ccw: [Nibble; 16],
@@ -184,7 +161,7 @@ pub struct Csa {
     b: [Nibble; 42],
     x: Nibble,
     y: Nibble,
-    z: u8,
+    z: Nibble,
     d: Nibble,
     e: u8,
     f: u8,
@@ -207,7 +184,7 @@ impl Default for Csa {
 
             x: Nibble::X00,
             y: Nibble::X00,
-            z: 0,
+            z: Nibble::X00,
             d: Nibble::X00,
             e: 0,
             f: 0,
@@ -264,7 +241,7 @@ impl Csa {
 
         self.x = Nibble::X00;
         self.y = Nibble::X00;
-        self.z = 0;
+        self.z = Nibble::X00;
         self.d = Nibble::X00;
         self.e = 0;
         self.f = 0;
@@ -301,11 +278,13 @@ impl Csa {
             ),
         );
 
-        self.d = Nibble::from(self.e) ^ Nibble::from(self.z) ^ tmp;
+        self.d = Nibble::from(self.e) ^ self.z ^ tmp;
 
         let tmp = self.f;
         if self.q != 0 {
-            self.f = self.z + self.e + self.r;
+            // TODO: replace
+            let z = (self.z.3 << 3) | (self.z.2 << 2) | (self.z.1 << 1) | self.z.0;
+            self.f = z + self.e + self.r;
             self.r = self.f >> 4;
             self.f = self.f & 0x0F;
         } else {
@@ -377,15 +356,6 @@ impl Csa {
             self.a[skip + 8].3
         );
 
-/*
-        bb_or!(
-            bb_bit!($v1   ) << 3,
-            bb_bit!($v2   ) << 2,
-            bb_bit!($v3, 1) << 1,
-            bb_bit!($v4, 1)
-        )
-*/
-
         self.x = Nibble::new(
             (s1 >> 1) & 0x01,
             (s2 >> 1) & 0x01,
@@ -400,7 +370,13 @@ impl Csa {
             s6 & 0x01,
         );
 
-        self.z = s_group!(s2, s1, s6, s5);
+        self.z = Nibble::new(
+            (s5 >> 1) & 0x01,
+            (s6 >> 1) & 0x01,
+            s1 & 0x01,
+            s2 & 0x01,
+        );
+
         self.p = SBOX7P[s7 as usize];
         self.q = SBOX7Q[s7 as usize];
     }
