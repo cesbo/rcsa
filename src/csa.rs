@@ -185,7 +185,7 @@ pub struct Csa {
     x: Nibble,
     y: Nibble,
     z: u8,
-    d: u8,
+    d: Nibble,
     e: u8,
     f: u8,
     r: u8,
@@ -208,7 +208,7 @@ impl Default for Csa {
             x: Nibble::X00,
             y: Nibble::X00,
             z: 0,
-            d: 0,
+            d: Nibble::X00,
             e: 0,
             f: 0,
             r: 0,
@@ -265,7 +265,7 @@ impl Csa {
         self.x = Nibble::X00;
         self.y = Nibble::X00;
         self.z = 0;
-        self.d = 0;
+        self.d = Nibble::X00;
         self.e = 0;
         self.f = 0;
         self.r = 0;
@@ -274,7 +274,7 @@ impl Csa {
     }
 
     fn b_group_xor(&mut self, skip: usize) {
-        let tmp = bb_or!(
+        let tmp = Nibble::new(
             bb_xor!(
                 self.b[skip + 9].2,
                 self.b[skip + 6].3,
@@ -286,22 +286,22 @@ impl Csa {
                 self.b[skip + 8].2,
                 self.b[skip + 4].0,
                 self.b[skip + 5].1
-            ) << 1,
+            ),
             bb_xor!(
                 self.b[skip + 6].0,
                 self.b[skip + 8].1,
                 self.b[skip + 3].3,
                 self.b[skip + 4].2
-            ) << 2,
+            ),
             bb_xor!(
                 self.b[skip + 3].0,
                 self.b[skip + 6].1,
                 self.b[skip + 7].2,
                 self.b[skip + 9].3
-            ) << 3
+            ),
         );
 
-        self.d = bb_xor!(self.e, self.z, tmp);
+        self.d = Nibble::from(self.e) ^ Nibble::from(self.z) ^ tmp;
 
         let tmp = self.f;
         if self.q != 0 {
@@ -412,8 +412,7 @@ impl Csa {
 
                 // TODO: replace
                 let tmp = Nibble::from((sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F);
-                let d = Nibble::from(self.d);
-                self.a[skip] = self.a[skip + 10] ^ self.x ^ d ^ tmp;
+                self.a[skip] = self.a[skip + 10] ^ self.x ^ self.d ^ tmp;
 
                 // TODO: replace
                 let tmp = Nibble::from((sb[i] >> ((j & 1) << 2)) & 0x0F);
@@ -433,8 +432,6 @@ impl Csa {
     }
 
     fn stream_cypher(&mut self, cb: &mut [u8]) {
-        let mut tmp;
-
         for i in 0 .. 8 {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
@@ -449,8 +446,7 @@ impl Csa {
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);
 
-                tmp = bb_xor!(self.d, self.d >> 1);
-                tmp = ((tmp >> 1) & 2) | (tmp & 1);
+                let tmp = ((self.d.2 ^ self.d.3) << 1) | (self.d.0 ^ self.d.1);
                 cb[i] = bb_or!(cb[i] << 2, tmp);
             }
         }
