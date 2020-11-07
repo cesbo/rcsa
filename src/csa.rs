@@ -3,6 +3,7 @@ use {
 
     crate::{
         key::expand_key,
+        Bits,
     },
 };
 
@@ -117,8 +118,8 @@ pub struct Csa {
     // stream cypher
     a: [u8; 42],
     b: [u8; 42],
-    x: u8,
-    y: u8,
+    x: Bits,
+    y: Bits,
     z: u8,
     d: u8,
     e: u8,
@@ -161,8 +162,8 @@ impl Default for Csa {
             a: unsafe { MaybeUninit::uninit().assume_init() },
             b: unsafe { MaybeUninit::uninit().assume_init() },
 
-            x: 0,
-            y: 0,
+            x: Bits::default(),
+            y: Bits::default(),
             z: 0,
             d: 0,
             e: 0,
@@ -213,8 +214,8 @@ impl Csa {
         self.b[40] = 0;
         self.b[41] = 0;
 
-        self.x = 0;
-        self.y = 0;
+        self.x = Bits::X00;
+        self.y = Bits::X00;
         self.z = 0;
         self.d = 0;
         self.e = 0;
@@ -331,9 +332,19 @@ impl Csa {
             bb_bit!(self.a[skip + 8], 3)
         );
 
-        self.x = s_group!(s4, s3, s2, s1);
-        self.y = s_group!(s6, s5, s4, s3);
+    /*        bb_or!(
+            bb_lsh!(bb_bit!($v1   ), 3),
+            bb_lsh!(bb_bit!($v2   ), 2),
+            bb_lsh!(bb_bit!($v3, 1), 1),
+            bb_bit!($v4, 1)
+        ) */
+        // self.x = s_group!(s4, s3, s2, s1);
+        self.x = Bits::new(s1 >> 1, s2 >> 1, s3, s4);
+        // self.y = s_group!(s6, s5, s4, s3);
+        self.y = Bits::new(s3 >> 1, s4 >> 1, s5, s6);
+
         self.z = s_group!(s2, s1, s6, s5);
+
         self.p = SBOX7P[s7 as usize];
         self.q = SBOX7Q[s7 as usize];
     }
@@ -345,14 +356,14 @@ impl Csa {
 
                 self.a[skip] = bb_xor!(
                     self.a[skip + 10],
-                    self.x,
+                    u8::from(&self.x),
                     self.d,
                     (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F
                 );
 
                 self.b[skip] = bb_xor!(
                     self.b[skip + 10],
-                    self.y,
+                    u8::from(&self.y),
                     self.b[skip + 7],
                     (sb[i] >> ((j & 1) << 2)) & 0x0F
                 );
@@ -378,12 +389,12 @@ impl Csa {
 
                 self.a[skip] = bb_xor!(
                     self.a[skip + 10],
-                    self.x
+                    u8::from(&self.x)
                 );
 
                 self.b[skip] = bb_xor!(
                     self.b[skip + 10],
-                    self.y,
+                    u8::from(&self.y),
                     self.b[skip + 7]
                 );
 
