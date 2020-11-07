@@ -37,10 +37,3 @@ macro_rules! bb_if {
         bb_xor!($a, bb_and!($cond, bb_xor!($a, $b)))
     };
 }
-
-
-macro_rules! bb_nibble_rotate_left {
-    ($v: expr) => {
-        bb_and_0f!(bb_lsh!($v, 1)) | bb_bit!($v, 3)
-    };
-}

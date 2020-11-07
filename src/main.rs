@@ -61,16 +61,16 @@ fn main() {
 
     println!("decryption: {}", buffer.as_slice() == TS_CLEAR);
 
-    // const TS_PKTS_FOR_TEST: usize = 30 * 1000;
+    const TS_PKTS_FOR_TEST: usize = 30 * 1000;
 
-    // let now = std::time::Instant::now();
-    // for _ in 0 .. TS_PKTS_FOR_TEST {
-    //     csa.decrypt(TS_SCRAMBLED, &mut buffer);
-    // }
-    // let diff = now.elapsed().as_micros() as f64;
+    let now = std::time::Instant::now();
+    for _ in 0 .. TS_PKTS_FOR_TEST {
+        csa.decrypt(TS_SCRAMBLED, &mut buffer);
+    }
+    let diff = now.elapsed().as_micros() as f64;
 
-    // println!(
-    //     "speed={:.4} Mbit/s\n",
-    //     (184 * TS_PKTS_FOR_TEST * 8 * 1000000) as f64 / diff / 1000000.0
-    // );
+    println!(
+        "speed={:.4} Mbit/s\n",
+        (184 * TS_PKTS_FOR_TEST * 8 * 1000000) as f64 / diff / 1000000.0
+    );
 }
