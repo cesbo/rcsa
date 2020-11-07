@@ -2,6 +2,10 @@ mod key;
 mod csa;
 
 
+mod nibble_u8;
+pub (crate) use nibble_u8::Nibble;
+
+
 use {
     csa::Csa,
 };

@@ -168,32 +168,17 @@ macro_rules! s_group {
 }
 
 
-#[inline]
-fn nibble_array(dest: &mut [u8], src: &[u8]) {
-    for i in 0 .. 8 {
-        dest[i * 2    ] = src[i] >> 4;
-        dest[i * 2 + 1] = src[i] & 0x0F;
-    }
-}
-
-
-#[inline]
-fn nibble_rotate_left(v: u8) -> u8 {
-    ((v << 1) & 0x0F) | ((v >> 3) & 1)
-}
-
-
 #[derive(Debug)]
 pub struct Csa {
-    ccw: [u8; 16],
+    ccw: [[u8; 4]; 16],
 
     // block cypher
     kk: [u8; 56],
     t: [u8; 64],
 
     // stream cypher
-    a: [u8; 42],
-    b: [u8; 42],
+    a: [[u8; 4]; 42],
+    b: [[u8; 4]; 42],
     x: u8,
     y: u8,
     z: u8,
@@ -233,9 +218,20 @@ impl Default for Csa {
 
 impl Csa {
     pub fn set_cw(&mut self, cw: &[u8; 8]) {
-        for (i, b) in cw.iter().enumerate() {
-            self.ccw[i * 2    ] = b >> 4;
-            self.ccw[i * 2 + 1] = b & 0x0F;
+        for i in 0 .. 8 {
+            let b = cw[i];
+
+            let p = i * 2;
+            self.ccw[p][0] = (b >> 4) & 0x01;
+            self.ccw[p][1] = (b >> 5) & 0x01;
+            self.ccw[p][2] = (b >> 6) & 0x01;
+            self.ccw[p][3] = (b >> 7) & 0x01;
+
+            let p = i * 2 + 1;
+            self.ccw[p][0] = (b >> 0) & 0x01;
+            self.ccw[p][1] = (b >> 1) & 0x01;
+            self.ccw[p][2] = (b >> 2) & 0x01;
+            self.ccw[p][3] = (b >> 3) & 0x01;
         }
 
         expand_key(&mut self.kk, cw);
@@ -265,15 +261,26 @@ impl Csa {
     }
 
     fn stream_init(&mut self) {
-        for i in 0 .. 8 {
-            self.a[32 + i] = self.ccw[i    ];
-            self.b[32 + i] = self.ccw[i + 8];
-        }
+        self.a[32 .. 40].copy_from_slice(&self.ccw[.. 8]);
+        self.b[32 .. 40].copy_from_slice(&self.ccw[8 ..]);
 
-        for i in 0 .. 2 {
-            self.a[40 + i] = 0;
-            self.b[40 + i] = 0;
-        }
+        self.a[40][0] = 0;
+        self.a[40][1] = 0;
+        self.a[40][2] = 0;
+        self.a[40][3] = 0;
+        self.a[41][0] = 0;
+        self.a[41][1] = 0;
+        self.a[41][2] = 0;
+        self.a[41][3] = 0;
+
+        self.b[40][0] = 0;
+        self.b[40][1] = 0;
+        self.b[40][2] = 0;
+        self.b[40][3] = 0;
+        self.b[41][0] = 0;
+        self.b[41][1] = 0;
+        self.b[41][2] = 0;
+        self.b[41][3] = 0;
 
         self.x = 0;
         self.y = 0;
@@ -289,29 +296,29 @@ impl Csa {
     fn b_group_xor(&mut self, skip: usize) {
         let tmp = bb_or!(
             bb_xor!(
-                bb_bit!(self.b[skip + 9], 2),
-                bb_bit!(self.b[skip + 6], 3),
-                bb_bit!(self.b[skip + 3], 1),
-                bb_bit!(self.b[skip + 8]   )
+                self.b[skip + 9][2],
+                self.b[skip + 6][3],
+                self.b[skip + 3][1],
+                self.b[skip + 8][0]
             ),
             bb_xor!(
-                bb_bit!(self.b[skip + 5], 3) << 1,
-                bb_bit!(self.b[skip + 8], 2) << 1,
-                bb_bit!(self.b[skip + 4]   ) << 1,
-                bb_bit!(self.b[skip + 5], 1) << 1
-            ),
+                self.b[skip + 5][3],
+                self.b[skip + 8][2],
+                self.b[skip + 4][0],
+                self.b[skip + 5][1]
+            ) << 1,
             bb_xor!(
-                bb_bit!(self.b[skip + 6]   ) << 2,
-                bb_bit!(self.b[skip + 8], 1) << 2,
-                bb_bit!(self.b[skip + 3], 3) << 2,
-                bb_bit!(self.b[skip + 4], 2) << 2
-            ),
+                self.b[skip + 6][0],
+                self.b[skip + 8][1],
+                self.b[skip + 3][3],
+                self.b[skip + 4][2]
+            ) << 2,
             bb_xor!(
-                bb_bit!(self.b[skip + 3]   ) << 3,
-                bb_bit!(self.b[skip + 6], 1) << 3,
-                bb_bit!(self.b[skip + 7], 2) << 3,
-                bb_bit!(self.b[skip + 9], 3) << 3
-            )
+                self.b[skip + 3][0],
+                self.b[skip + 6][1],
+                self.b[skip + 7][2],
+                self.b[skip + 9][3]
+            ) << 3
         );
 
         self.d = bb_xor!(self.e, self.z, tmp);
@@ -329,65 +336,65 @@ impl Csa {
 
     fn a_group_xor(&mut self, skip: usize) {
         let s1 = bb_or!(
-            bb_bit!(self.a[skip + 4]   ) << 4,
-            bb_bit!(self.a[skip + 1], 2) << 3,
-            bb_bit!(self.a[skip + 6], 1) << 2,
-            bb_bit!(self.a[skip + 7], 3) << 1,
-            bb_bit!(self.a[skip + 9]   )
+            self.a[skip + 4][0] << 4,
+            self.a[skip + 1][2] << 3,
+            self.a[skip + 6][1] << 2,
+            self.a[skip + 7][3] << 1,
+            self.a[skip + 9][0]
         );
         let s1 = SBOX1[s1 as usize];
 
         let s2 = bb_or!(
-            bb_bit!(self.a[skip + 2], 1) << 4,
-            bb_bit!(self.a[skip + 3], 2) << 3,
-            bb_bit!(self.a[skip + 6], 3) << 2,
-            bb_bit!(self.a[skip + 7]   ) << 1,
-            bb_bit!(self.a[skip + 9], 1)
+            self.a[skip + 2][1] << 4,
+            self.a[skip + 3][2] << 3,
+            self.a[skip + 6][3] << 2,
+            self.a[skip + 7][0] << 1,
+            self.a[skip + 9][1]
         );
         let s2 = SBOX2[s2 as usize];
 
         let s3 = bb_or!(
-            bb_bit!(self.a[skip + 1], 3) << 4,
-            bb_bit!(self.a[skip + 2]   ) << 3,
-            bb_bit!(self.a[skip + 5], 1) << 2,
-            bb_bit!(self.a[skip + 5], 3) << 1,
-            bb_bit!(self.a[skip + 6], 2)
+            self.a[skip + 1][3] << 4,
+            self.a[skip + 2][0] << 3,
+            self.a[skip + 5][1] << 2,
+            self.a[skip + 5][3] << 1,
+            self.a[skip + 6][2]
         );
         let s3 = SBOX3[s3 as usize];
 
         let s4 = bb_or!(
-            bb_bit!(self.a[skip + 3], 3) << 4,
-            bb_bit!(self.a[skip + 1], 1) << 3,
-            bb_bit!(self.a[skip + 2], 3) << 2,
-            bb_bit!(self.a[skip + 4], 2) << 1,
-            bb_bit!(self.a[skip + 8]   )
+            self.a[skip + 3][3] << 4,
+            self.a[skip + 1][1] << 3,
+            self.a[skip + 2][3] << 2,
+            self.a[skip + 4][2] << 1,
+            self.a[skip + 8][0]
         );
         let s4 = SBOX4[s4 as usize];
 
         let s5 = bb_or!(
-            bb_bit!(self.a[skip + 5], 2) << 4,
-            bb_bit!(self.a[skip + 4], 3) << 3,
-            bb_bit!(self.a[skip + 6]   ) << 2,
-            bb_bit!(self.a[skip + 8], 1) << 1,
-            bb_bit!(self.a[skip + 9], 2)
+            self.a[skip + 5][2] << 4,
+            self.a[skip + 4][3] << 3,
+            self.a[skip + 6][0] << 2,
+            self.a[skip + 8][1] << 1,
+            self.a[skip + 9][2]
         );
         let s5 = SBOX5[s5 as usize];
 
         let s6 = bb_or!(
-            bb_bit!(self.a[skip + 3], 1) << 4,
-            bb_bit!(self.a[skip + 4], 1) << 3,
-            bb_bit!(self.a[skip + 5]   ) << 2,
-            bb_bit!(self.a[skip + 7], 2) << 1,
-            bb_bit!(self.a[skip + 9], 3)
+            self.a[skip + 3][1] << 4,
+            self.a[skip + 4][1] << 3,
+            self.a[skip + 5][0] << 2,
+            self.a[skip + 7][2] << 1,
+            self.a[skip + 9][3]
         );
         let s6 = SBOX6[s6 as usize];
 
         let s7 = bb_or!(
-            bb_bit!(self.a[skip + 2], 2) << 4,
-            bb_bit!(self.a[skip + 3]   ) << 3,
-            bb_bit!(self.a[skip + 7], 1) << 2,
-            bb_bit!(self.a[skip + 8], 2) << 1,
-            bb_bit!(self.a[skip + 8], 3)
+            self.a[skip + 2][2] << 4,
+            self.a[skip + 3][0] << 3,
+            self.a[skip + 7][1] << 2,
+            self.a[skip + 8][2] << 1,
+            self.a[skip + 8][3]
         );
 
         self.x = s_group!(s4, s3, s2, s1);
@@ -402,22 +409,72 @@ impl Csa {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
-                self.a[skip] = bb_xor!(
-                    self.a[skip + 10],
-                    self.x,
-                    self.d,
-                    (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F
+                let tmp = (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F;
+
+                self.a[skip][0] = bb_xor!(
+                    self.a[skip + 10][0],
+                    bb_bit!(self.x, 0),
+                    bb_bit!(self.d, 0),
+                    bb_bit!(tmp, 0)
                 );
 
-                self.b[skip] = bb_xor!(
-                    self.b[skip + 10],
-                    self.y,
-                    self.b[skip + 7],
-                    (sb[i] >> ((j & 1) << 2)) & 0x0F
+                self.a[skip][1] = bb_xor!(
+                    self.a[skip + 10][1],
+                    bb_bit!(self.x, 1),
+                    bb_bit!(self.d, 1),
+                    bb_bit!(tmp, 1)
+                );
+
+                self.a[skip][2] = bb_xor!(
+                    self.a[skip + 10][2],
+                    bb_bit!(self.x, 2),
+                    bb_bit!(self.d, 2),
+                    bb_bit!(tmp, 2)
+                );
+
+                self.a[skip][3] = bb_xor!(
+                    self.a[skip + 10][3],
+                    bb_bit!(self.x, 3),
+                    bb_bit!(self.d, 3),
+                    bb_bit!(tmp, 3)
+                );
+
+                let tmp = (sb[i] >> ((j & 1) << 2)) & 0x0F;
+
+                self.b[skip][0] = bb_xor!(
+                    self.b[skip + 10][0],
+                    bb_bit!(self.y, 0),
+                    self.b[skip + 7][0],
+                    bb_bit!(tmp, 0)
+                );
+
+                self.b[skip][1] = bb_xor!(
+                    self.b[skip + 10][1],
+                    bb_bit!(self.y, 1),
+                    self.b[skip + 7][1],
+                    bb_bit!(tmp, 1)
+                );
+
+                self.b[skip][2] = bb_xor!(
+                    self.b[skip + 10][2],
+                    bb_bit!(self.y, 2),
+                    self.b[skip + 7][2],
+                    bb_bit!(tmp, 2)
+                );
+
+                self.b[skip][3] = bb_xor!(
+                    self.b[skip + 10][3],
+                    bb_bit!(self.y, 3),
+                    self.b[skip + 7][3],
+                    bb_bit!(tmp, 3)
                 );
 
                 if self.p != 0 {
-                    self.b[skip] = nibble_rotate_left(self.b[skip]);
+                    let tmp = self.b[skip][3];
+                    self.b[skip][3] = self.b[skip][2];
+                    self.b[skip][2] = self.b[skip][1];
+                    self.b[skip][1] = self.b[skip][0];
+                    self.b[skip][0] = tmp;
                 }
 
                 self.b_group_xor(skip);
@@ -425,10 +482,8 @@ impl Csa {
             }
         }
 
-        for i in 0 .. 10 {
-            self.a[32 + i] = self.a[i];
-            self.b[32 + i] = self.b[i];
-        }
+        self.a.copy_within(0 .. 10, 32);
+        self.b.copy_within(0 .. 10, 32);
     }
 
     fn stream_cypher(&mut self, cb: &mut [u8]) {
@@ -438,19 +493,22 @@ impl Csa {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
-                self.a[skip] = bb_xor!(
-                    self.a[skip + 10],
-                    self.x
-                );
+                self.a[skip][0] = bb_xor!(self.a[skip + 10][0], bb_bit!(self.x, 0));
+                self.a[skip][1] = bb_xor!(self.a[skip + 10][1], bb_bit!(self.x, 1));
+                self.a[skip][2] = bb_xor!(self.a[skip + 10][2], bb_bit!(self.x, 2));
+                self.a[skip][3] = bb_xor!(self.a[skip + 10][3], bb_bit!(self.x, 3));
 
-                self.b[skip] = bb_xor!(
-                    self.b[skip + 10],
-                    self.y,
-                    self.b[skip + 7]
-                );
+                self.b[skip][0] = bb_xor!(self.b[skip + 10][0], bb_bit!(self.y, 0), self.b[skip + 7][0]);
+                self.b[skip][1] = bb_xor!(self.b[skip + 10][1], bb_bit!(self.y, 1), self.b[skip + 7][1]);
+                self.b[skip][2] = bb_xor!(self.b[skip + 10][2], bb_bit!(self.y, 2), self.b[skip + 7][2]);
+                self.b[skip][3] = bb_xor!(self.b[skip + 10][3], bb_bit!(self.y, 3), self.b[skip + 7][3]);
 
                 if self.p != 0 {
-                    self.b[skip] = nibble_rotate_left(self.b[skip]);
+                    let tmp = self.b[skip][3];
+                    self.b[skip][3] = self.b[skip][2];
+                    self.b[skip][2] = self.b[skip][1];
+                    self.b[skip][1] = self.b[skip][0];
+                    self.b[skip][0] = tmp;
                 }
 
                 self.b_group_xor(skip);
@@ -462,10 +520,8 @@ impl Csa {
             }
         }
 
-        for i in 0 .. 10 {
-            self.a[32 + i] = self.a[i];
-            self.b[32 + i] = self.b[i];
-        }
+        self.a.copy_within(0 .. 10, 32);
+        self.b.copy_within(0 .. 10, 32);
     }
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
