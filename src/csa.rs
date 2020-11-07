@@ -95,18 +95,6 @@ const SBOX7Q: [u8; 0x20] = [
 ];
 
 
-macro_rules! s_group {
-    ($v1: expr, $v2: expr, $v3: expr, $v4: expr) => {
-        bb_or!(
-            bb_lsh!(bb_bit!($v1   ), 3),
-            bb_lsh!(bb_bit!($v2   ), 2),
-            bb_lsh!(bb_bit!($v3, 1), 1),
-            bb_bit!($v4, 1)
-        )
-    };
-}
-
-
 #[derive(Debug)]
 pub struct Csa {
     ccw: [u8; 16],
@@ -120,7 +108,7 @@ pub struct Csa {
     b: [u8; 42],
     x: Bits,
     y: Bits,
-    z: u8,
+    z: Bits,
     d: u8,
     e: u8,
     f: u8,
@@ -164,7 +152,7 @@ impl Default for Csa {
 
             x: Bits::default(),
             y: Bits::default(),
-            z: 0,
+            z: Bits::default(),
             d: 0,
             e: 0,
             f: 0,
@@ -216,7 +204,7 @@ impl Csa {
 
         self.x = Bits::X00;
         self.y = Bits::X00;
-        self.z = 0;
+        self.z = Bits::X00;
         self.d = 0;
         self.e = 0;
         self.f = 0;
@@ -254,11 +242,11 @@ impl Csa {
             )
         );
 
-        self.d = bb_xor!(self.e, self.z, tmp);
+        self.d = bb_xor!(self.e, u8::from(&self.z), tmp);
 
         let tmp = self.f;
 
-        let next_f = self.z + self.e + self.r;
+        let next_f = u8::from(&self.z) + self.e + self.r;
         let next_r = next_f >> 4;
         let next_f = next_f & 0x0F;
 
@@ -332,18 +320,9 @@ impl Csa {
             bb_bit!(self.a[skip + 8], 3)
         );
 
-    /*        bb_or!(
-            bb_lsh!(bb_bit!($v1   ), 3),
-            bb_lsh!(bb_bit!($v2   ), 2),
-            bb_lsh!(bb_bit!($v3, 1), 1),
-            bb_bit!($v4, 1)
-        ) */
-        // self.x = s_group!(s4, s3, s2, s1);
         self.x = Bits::new(s1 >> 1, s2 >> 1, s3, s4);
-        // self.y = s_group!(s6, s5, s4, s3);
         self.y = Bits::new(s3 >> 1, s4 >> 1, s5, s6);
-
-        self.z = s_group!(s2, s1, s6, s5);
+        self.z = Bits::new(s5 >> 1, s6 >> 1, s1, s2);
 
         self.p = SBOX7P[s7 as usize];
         self.q = SBOX7Q[s7 as usize];
