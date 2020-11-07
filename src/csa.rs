@@ -1,6 +1,9 @@
 use {
     std::mem::MaybeUninit,
-    crate::key::expand_key,
+    crate::{
+        key::expand_key,
+        Nibble,
+    },
 };
 
 
@@ -170,17 +173,17 @@ macro_rules! s_group {
 
 #[derive(Debug)]
 pub struct Csa {
-    ccw: [[u8; 4]; 16],
+    ccw: [Nibble; 16],
 
     // block cypher
     kk: [u8; 56],
     t: [u8; 64],
 
     // stream cypher
-    a: [[u8; 4]; 42],
-    b: [[u8; 4]; 42],
-    x: u8,
-    y: u8,
+    a: [Nibble; 42],
+    b: [Nibble; 42],
+    x: Nibble,
+    y: Nibble,
     z: u8,
     d: u8,
     e: u8,
@@ -202,8 +205,8 @@ impl Default for Csa {
             a: unsafe { MaybeUninit::uninit().assume_init() },
             b: unsafe { MaybeUninit::uninit().assume_init() },
 
-            x: 0,
-            y: 0,
+            x: Nibble::X00,
+            y: Nibble::X00,
             z: 0,
             d: 0,
             e: 0,
@@ -219,19 +222,8 @@ impl Default for Csa {
 impl Csa {
     pub fn set_cw(&mut self, cw: &[u8; 8]) {
         for i in 0 .. 8 {
-            let b = cw[i];
-
-            let p = i * 2;
-            self.ccw[p][0] = (b >> 4) & 0x01;
-            self.ccw[p][1] = (b >> 5) & 0x01;
-            self.ccw[p][2] = (b >> 6) & 0x01;
-            self.ccw[p][3] = (b >> 7) & 0x01;
-
-            let p = i * 2 + 1;
-            self.ccw[p][0] = (b >> 0) & 0x01;
-            self.ccw[p][1] = (b >> 1) & 0x01;
-            self.ccw[p][2] = (b >> 2) & 0x01;
-            self.ccw[p][3] = (b >> 3) & 0x01;
+            self.ccw[i * 2    ] = Nibble::from(cw[i] >> 4);
+            self.ccw[i * 2 + 1] = Nibble::from(cw[i]     );
         }
 
         expand_key(&mut self.kk, cw);
@@ -264,26 +256,14 @@ impl Csa {
         self.a[32 .. 40].copy_from_slice(&self.ccw[.. 8]);
         self.b[32 .. 40].copy_from_slice(&self.ccw[8 ..]);
 
-        self.a[40][0] = 0;
-        self.a[40][1] = 0;
-        self.a[40][2] = 0;
-        self.a[40][3] = 0;
-        self.a[41][0] = 0;
-        self.a[41][1] = 0;
-        self.a[41][2] = 0;
-        self.a[41][3] = 0;
+        self.a[40] = Nibble::X00;
+        self.a[41] = Nibble::X00;
 
-        self.b[40][0] = 0;
-        self.b[40][1] = 0;
-        self.b[40][2] = 0;
-        self.b[40][3] = 0;
-        self.b[41][0] = 0;
-        self.b[41][1] = 0;
-        self.b[41][2] = 0;
-        self.b[41][3] = 0;
+        self.b[40] = Nibble::X00;
+        self.b[41] = Nibble::X00;
 
-        self.x = 0;
-        self.y = 0;
+        self.x = Nibble::X00;
+        self.y = Nibble::X00;
         self.z = 0;
         self.d = 0;
         self.e = 0;
@@ -296,28 +276,28 @@ impl Csa {
     fn b_group_xor(&mut self, skip: usize) {
         let tmp = bb_or!(
             bb_xor!(
-                self.b[skip + 9][2],
-                self.b[skip + 6][3],
-                self.b[skip + 3][1],
-                self.b[skip + 8][0]
+                self.b[skip + 9].2,
+                self.b[skip + 6].3,
+                self.b[skip + 3].1,
+                self.b[skip + 8].0
             ),
             bb_xor!(
-                self.b[skip + 5][3],
-                self.b[skip + 8][2],
-                self.b[skip + 4][0],
-                self.b[skip + 5][1]
+                self.b[skip + 5].3,
+                self.b[skip + 8].2,
+                self.b[skip + 4].0,
+                self.b[skip + 5].1
             ) << 1,
             bb_xor!(
-                self.b[skip + 6][0],
-                self.b[skip + 8][1],
-                self.b[skip + 3][3],
-                self.b[skip + 4][2]
+                self.b[skip + 6].0,
+                self.b[skip + 8].1,
+                self.b[skip + 3].3,
+                self.b[skip + 4].2
             ) << 2,
             bb_xor!(
-                self.b[skip + 3][0],
-                self.b[skip + 6][1],
-                self.b[skip + 7][2],
-                self.b[skip + 9][3]
+                self.b[skip + 3].0,
+                self.b[skip + 6].1,
+                self.b[skip + 7].2,
+                self.b[skip + 9].3
             ) << 3
         );
 
@@ -336,69 +316,90 @@ impl Csa {
 
     fn a_group_xor(&mut self, skip: usize) {
         let s1 = bb_or!(
-            self.a[skip + 4][0] << 4,
-            self.a[skip + 1][2] << 3,
-            self.a[skip + 6][1] << 2,
-            self.a[skip + 7][3] << 1,
-            self.a[skip + 9][0]
+            self.a[skip + 4].0 << 4,
+            self.a[skip + 1].2 << 3,
+            self.a[skip + 6].1 << 2,
+            self.a[skip + 7].3 << 1,
+            self.a[skip + 9].0
         );
         let s1 = SBOX1[s1 as usize];
 
         let s2 = bb_or!(
-            self.a[skip + 2][1] << 4,
-            self.a[skip + 3][2] << 3,
-            self.a[skip + 6][3] << 2,
-            self.a[skip + 7][0] << 1,
-            self.a[skip + 9][1]
+            self.a[skip + 2].1 << 4,
+            self.a[skip + 3].2 << 3,
+            self.a[skip + 6].3 << 2,
+            self.a[skip + 7].0 << 1,
+            self.a[skip + 9].1
         );
         let s2 = SBOX2[s2 as usize];
 
         let s3 = bb_or!(
-            self.a[skip + 1][3] << 4,
-            self.a[skip + 2][0] << 3,
-            self.a[skip + 5][1] << 2,
-            self.a[skip + 5][3] << 1,
-            self.a[skip + 6][2]
+            self.a[skip + 1].3 << 4,
+            self.a[skip + 2].0 << 3,
+            self.a[skip + 5].1 << 2,
+            self.a[skip + 5].3 << 1,
+            self.a[skip + 6].2
         );
         let s3 = SBOX3[s3 as usize];
 
         let s4 = bb_or!(
-            self.a[skip + 3][3] << 4,
-            self.a[skip + 1][1] << 3,
-            self.a[skip + 2][3] << 2,
-            self.a[skip + 4][2] << 1,
-            self.a[skip + 8][0]
+            self.a[skip + 3].3 << 4,
+            self.a[skip + 1].1 << 3,
+            self.a[skip + 2].3 << 2,
+            self.a[skip + 4].2 << 1,
+            self.a[skip + 8].0
         );
         let s4 = SBOX4[s4 as usize];
 
         let s5 = bb_or!(
-            self.a[skip + 5][2] << 4,
-            self.a[skip + 4][3] << 3,
-            self.a[skip + 6][0] << 2,
-            self.a[skip + 8][1] << 1,
-            self.a[skip + 9][2]
+            self.a[skip + 5].2 << 4,
+            self.a[skip + 4].3 << 3,
+            self.a[skip + 6].0 << 2,
+            self.a[skip + 8].1 << 1,
+            self.a[skip + 9].2
         );
         let s5 = SBOX5[s5 as usize];
 
         let s6 = bb_or!(
-            self.a[skip + 3][1] << 4,
-            self.a[skip + 4][1] << 3,
-            self.a[skip + 5][0] << 2,
-            self.a[skip + 7][2] << 1,
-            self.a[skip + 9][3]
+            self.a[skip + 3].1 << 4,
+            self.a[skip + 4].1 << 3,
+            self.a[skip + 5].0 << 2,
+            self.a[skip + 7].2 << 1,
+            self.a[skip + 9].3
         );
         let s6 = SBOX6[s6 as usize];
 
         let s7 = bb_or!(
-            self.a[skip + 2][2] << 4,
-            self.a[skip + 3][0] << 3,
-            self.a[skip + 7][1] << 2,
-            self.a[skip + 8][2] << 1,
-            self.a[skip + 8][3]
+            self.a[skip + 2].2 << 4,
+            self.a[skip + 3].0 << 3,
+            self.a[skip + 7].1 << 2,
+            self.a[skip + 8].2 << 1,
+            self.a[skip + 8].3
         );
 
-        self.x = s_group!(s4, s3, s2, s1);
-        self.y = s_group!(s6, s5, s4, s3);
+/*
+        bb_or!(
+            bb_bit!($v1   ) << 3,
+            bb_bit!($v2   ) << 2,
+            bb_bit!($v3, 1) << 1,
+            bb_bit!($v4, 1)
+        )
+*/
+
+        self.x = Nibble::new(
+            (s1 >> 1) & 0x01,
+            (s2 >> 1) & 0x01,
+            s3 & 0x01,
+            s4 & 0x01,
+        );
+
+        self.y = Nibble::new(
+            (s3 >> 1) & 0x01,
+            (s4 >> 1) & 0x01,
+            s5 & 0x01,
+            s6 & 0x01,
+        );
+
         self.z = s_group!(s2, s1, s6, s5);
         self.p = SBOX7P[s7 as usize];
         self.q = SBOX7Q[s7 as usize];
@@ -409,72 +410,17 @@ impl Csa {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
-                let tmp = (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F;
+                // TODO: replace
+                let tmp = Nibble::from((sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F);
+                let d = Nibble::from(self.d);
+                self.a[skip] = self.a[skip + 10] ^ self.x ^ d ^ tmp;
 
-                self.a[skip][0] = bb_xor!(
-                    self.a[skip + 10][0],
-                    bb_bit!(self.x, 0),
-                    bb_bit!(self.d, 0),
-                    bb_bit!(tmp, 0)
-                );
-
-                self.a[skip][1] = bb_xor!(
-                    self.a[skip + 10][1],
-                    bb_bit!(self.x, 1),
-                    bb_bit!(self.d, 1),
-                    bb_bit!(tmp, 1)
-                );
-
-                self.a[skip][2] = bb_xor!(
-                    self.a[skip + 10][2],
-                    bb_bit!(self.x, 2),
-                    bb_bit!(self.d, 2),
-                    bb_bit!(tmp, 2)
-                );
-
-                self.a[skip][3] = bb_xor!(
-                    self.a[skip + 10][3],
-                    bb_bit!(self.x, 3),
-                    bb_bit!(self.d, 3),
-                    bb_bit!(tmp, 3)
-                );
-
-                let tmp = (sb[i] >> ((j & 1) << 2)) & 0x0F;
-
-                self.b[skip][0] = bb_xor!(
-                    self.b[skip + 10][0],
-                    bb_bit!(self.y, 0),
-                    self.b[skip + 7][0],
-                    bb_bit!(tmp, 0)
-                );
-
-                self.b[skip][1] = bb_xor!(
-                    self.b[skip + 10][1],
-                    bb_bit!(self.y, 1),
-                    self.b[skip + 7][1],
-                    bb_bit!(tmp, 1)
-                );
-
-                self.b[skip][2] = bb_xor!(
-                    self.b[skip + 10][2],
-                    bb_bit!(self.y, 2),
-                    self.b[skip + 7][2],
-                    bb_bit!(tmp, 2)
-                );
-
-                self.b[skip][3] = bb_xor!(
-                    self.b[skip + 10][3],
-                    bb_bit!(self.y, 3),
-                    self.b[skip + 7][3],
-                    bb_bit!(tmp, 3)
-                );
+                // TODO: replace
+                let tmp = Nibble::from((sb[i] >> ((j & 1) << 2)) & 0x0F);
+                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7] ^ tmp;
 
                 if self.p != 0 {
-                    let tmp = self.b[skip][3];
-                    self.b[skip][3] = self.b[skip][2];
-                    self.b[skip][2] = self.b[skip][1];
-                    self.b[skip][1] = self.b[skip][0];
-                    self.b[skip][0] = tmp;
+                    self.b[skip] = self.b[skip].rotate_left();
                 }
 
                 self.b_group_xor(skip);
@@ -493,22 +439,11 @@ impl Csa {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
-                self.a[skip][0] = bb_xor!(self.a[skip + 10][0], bb_bit!(self.x, 0));
-                self.a[skip][1] = bb_xor!(self.a[skip + 10][1], bb_bit!(self.x, 1));
-                self.a[skip][2] = bb_xor!(self.a[skip + 10][2], bb_bit!(self.x, 2));
-                self.a[skip][3] = bb_xor!(self.a[skip + 10][3], bb_bit!(self.x, 3));
-
-                self.b[skip][0] = bb_xor!(self.b[skip + 10][0], bb_bit!(self.y, 0), self.b[skip + 7][0]);
-                self.b[skip][1] = bb_xor!(self.b[skip + 10][1], bb_bit!(self.y, 1), self.b[skip + 7][1]);
-                self.b[skip][2] = bb_xor!(self.b[skip + 10][2], bb_bit!(self.y, 2), self.b[skip + 7][2]);
-                self.b[skip][3] = bb_xor!(self.b[skip + 10][3], bb_bit!(self.y, 3), self.b[skip + 7][3]);
+                self.a[skip] = self.a[skip + 10] ^ self.x;
+                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7];
 
                 if self.p != 0 {
-                    let tmp = self.b[skip][3];
-                    self.b[skip][3] = self.b[skip][2];
-                    self.b[skip][2] = self.b[skip][1];
-                    self.b[skip][1] = self.b[skip][0];
-                    self.b[skip][0] = tmp;
+                    self.b[skip] = self.b[skip].rotate_left();
                 }
 
                 self.b_group_xor(skip);
