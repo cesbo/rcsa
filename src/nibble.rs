@@ -4,22 +4,32 @@ use {
             BitXor,
         },
     },
+
+    crate::Bit,
 };
 
 
 #[derive(Debug, Copy, Clone)]
-pub struct Nibble (pub u8, pub u8, pub u8, pub u8);
+pub struct Nibble (pub Bit, pub Bit, pub Bit, pub Bit);
 
 
 impl Nibble {
-    pub const fn new(b0: u8, b1: u8, b2: u8, b3: u8) -> Self {
+    pub const fn new(b0: Bit, b1: Bit, b2: Bit, b3: Bit) -> Self {
         Nibble (b0, b1, b2, b3)
     }
 
-    pub const X00: Self = Nibble::new(0, 0, 0, 0);
+    pub const N0: Self = Nibble::new(Bit::B0, Bit::B0, Bit::B0, Bit::B0);
 
     pub fn rotate_left(&self) -> Self {
         Nibble (self.3, self.0, self.1, self.2)
+    }
+
+    // TODO: unwrap many packets
+    pub fn unwrap(&self) -> u8 {
+        self.0.unwrap() |
+        self.1.unwrap() << 1 |
+        self.2.unwrap() << 2 |
+        self.3.unwrap()
     }
 }
 
@@ -33,18 +43,6 @@ impl BitXor for Nibble {
             self.1 ^ rhs.1,
             self.2 ^ rhs.2,
             self.3 ^ rhs.3,
-        )
-    }
-}
-
-
-impl From<u8> for Nibble {
-    fn from(v: u8) -> Self {
-        Nibble (
-            (v >> 0) & 1,
-            (v >> 1) & 1,
-            (v >> 2) & 1,
-            (v >> 3) & 1,
         )
     }
 }

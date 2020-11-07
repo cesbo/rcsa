@@ -2,8 +2,16 @@ mod key;
 mod csa;
 
 
-mod nibble_u8;
-pub (crate) use nibble_u8::Nibble;
+mod bit_u1;
+pub (crate) use bit_u1::{
+    Bit,
+};
+
+
+mod nibble;
+pub (crate) use nibble::{
+    Nibble,
+};
 
 
 use {

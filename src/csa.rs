@@ -2,6 +2,7 @@ use {
     std::mem::MaybeUninit,
     crate::{
         key::expand_key,
+        Bit,
         Nibble,
     },
 };
@@ -165,6 +166,7 @@ pub struct Csa {
     d: Nibble,
     e: Nibble,
     f: Nibble,
+
     r: u8,
     p: u8,
     q: u8,
@@ -182,12 +184,12 @@ impl Default for Csa {
             a: unsafe { MaybeUninit::uninit().assume_init() },
             b: unsafe { MaybeUninit::uninit().assume_init() },
 
-            x: Nibble::X00,
-            y: Nibble::X00,
-            z: Nibble::X00,
-            d: Nibble::X00,
-            e: Nibble::X00,
-            f: Nibble::X00,
+            x: Nibble::N0,
+            y: Nibble::N0,
+            z: Nibble::N0,
+            d: Nibble::N0,
+            e: Nibble::N0,
+            f: Nibble::N0,
             r: 0,
             p: 0,
             q: 0,
@@ -199,8 +201,21 @@ impl Default for Csa {
 impl Csa {
     pub fn set_cw(&mut self, cw: &[u8; 8]) {
         for i in 0 .. 8 {
-            self.ccw[i * 2    ] = Nibble::from(cw[i] >> 4);
-            self.ccw[i * 2 + 1] = Nibble::from(cw[i]     );
+            let tmp = cw[i] >> 4;
+            self.ccw[i * 2    ] = Nibble::new(
+                Bit::new(tmp),
+                Bit::new(tmp >> 1),
+                Bit::new(tmp >> 2),
+                Bit::new(tmp >> 3),
+            );
+
+            let tmp = cw[i];
+            self.ccw[i * 2 + 1] = Nibble::new(
+                Bit::new(tmp),
+                Bit::new(tmp >> 1),
+                Bit::new(tmp >> 2),
+                Bit::new(tmp >> 3),
+            );
         }
 
         expand_key(&mut self.kk, cw);
@@ -233,18 +248,18 @@ impl Csa {
         self.a[32 .. 40].copy_from_slice(&self.ccw[.. 8]);
         self.b[32 .. 40].copy_from_slice(&self.ccw[8 ..]);
 
-        self.a[40] = Nibble::X00;
-        self.a[41] = Nibble::X00;
+        self.a[40] = Nibble::N0;
+        self.a[41] = Nibble::N0;
 
-        self.b[40] = Nibble::X00;
-        self.b[41] = Nibble::X00;
+        self.b[40] = Nibble::N0;
+        self.b[41] = Nibble::N0;
 
-        self.x = Nibble::X00;
-        self.y = Nibble::X00;
-        self.z = Nibble::X00;
-        self.d = Nibble::X00;
-        self.e = Nibble::X00;
-        self.f = Nibble::X00;
+        self.x = Nibble::N0;
+        self.y = Nibble::N0;
+        self.z = Nibble::N0;
+        self.d = Nibble::N0;
+        self.e = Nibble::N0;
+        self.f = Nibble::N0;
         self.r = 0;
         self.p = 0;
         self.q = 0;
@@ -285,13 +300,13 @@ impl Csa {
             // TODO: replace
             let z = (self.z.3 << 3) | (self.z.2 << 2) | (self.z.1 << 1) | self.z.0;
             let e = (self.e.3 << 3) | (self.e.2 << 2) | (self.e.1 << 1) | self.e.0;
-            let f = z + e + self.r;
+            let f = z.unwrap() + e.unwrap() + self.r;
             self.r = f >> 4;
             self.f = Nibble::new(
-                f & 0x01,
-                (f >> 1) & 0x01,
-                (f >> 2) & 0x01,
-                (f >> 3) & 0x01,
+                Bit::new(f),
+                Bit::new(f >> 1),
+                Bit::new(f >> 2),
+                Bit::new(f >> 3),
             );
         } else {
             self.f = self.e;
@@ -300,6 +315,7 @@ impl Csa {
     }
 
     fn a_group_xor(&mut self, skip: usize) {
+        // TODO: bit-ops instead of s-boxes
         let s1 = bb_or!(
             self.a[skip + 4].0 << 4,
             self.a[skip + 1].2 << 3,
@@ -392,12 +408,24 @@ impl Csa {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
-                // TODO: replace
-                let tmp = Nibble::from((sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F);
+                // TODO: wrap many packets
+                let tmp = (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F;
+                let tmp = Nibble::new(
+                    Bit::new(tmp >> 0),
+                    Bit::new(tmp >> 1),
+                    Bit::new(tmp >> 2),
+                    Bit::new(tmp >> 3),
+                );
                 self.a[skip] = self.a[skip + 10] ^ self.x ^ self.d ^ tmp;
 
-                // TODO: replace
-                let tmp = Nibble::from((sb[i] >> ((j & 1) << 2)) & 0x0F);
+                // TODO: wrap many packets
+                let tmp = (sb[i] >> ((j & 1) << 2)) & 0x0F;
+                let tmp = Nibble::new(
+                    Bit::new(tmp >> 0),
+                    Bit::new(tmp >> 1),
+                    Bit::new(tmp >> 2),
+                    Bit::new(tmp >> 3),
+                );
                 self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7] ^ tmp;
 
                 if self.p != 0 {
@@ -429,13 +457,19 @@ impl Csa {
                 self.a_group_xor(skip);
 
                 let tmp = ((self.d.2 ^ self.d.3) << 1) | (self.d.0 ^ self.d.1);
-                cb[i] = bb_or!(cb[i] << 2, tmp);
+
+                // TODO: unwrap many packets
+                cb[i] = cb[i] << 2 | tmp.unwrap();
             }
         }
 
         self.a.copy_within(0 .. 10, 32);
         self.b.copy_within(0 .. 10, 32);
     }
+
+    // Bit - структура содержи 1 бит пакета, bi_u8 при параллельной обработке
+    // может содержать по одному биту из 8 пакетов
+    // Nibble - полубайт. Содержит 4 бита
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
         let mut block: [u8; 8] = unsafe { MaybeUninit::uninit().assume_init() };
