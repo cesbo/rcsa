@@ -1,10 +1,17 @@
+#[macro_use]
+mod op_u8;
+
+#[macro_use]
+mod op;
+
 mod csa;
+mod key;
 
 
 use {
-    // std::{
-    //     time::Instant,
-    // },
+    std::{
+        time::Instant,
+    },
     csa::Csa,
 };
 
@@ -48,7 +55,7 @@ const TS_CLEAR: &[u8] = &[
 
 fn main() {
     let mut csa = Csa::default();
-    csa.set_cw(CW);
+    csa.set_cw(&CW);
 
     let mut buffer = Vec::<u8>::new();
     buffer.resize(TS_SCRAMBLED.len(), 0x00);
@@ -56,16 +63,16 @@ fn main() {
 
     println!("decryption: {}", buffer.as_slice() == TS_CLEAR);
 
-    // const TS_PKTS_FOR_TEST: usize = 30 * 1000;
+    const TS_PKTS_FOR_TEST: usize = 30 * 1000;
 
-    // let now = Instant::now();
-    // for _ in 0 .. TS_PKTS_FOR_TEST {
-    //     csa.decrypt(TS_SCRAMBLED, &mut buffer);
-    // }
-    // let diff = now.elapsed().as_micros() as f64;
+    let now = Instant::now();
+    for _ in 0 .. TS_PKTS_FOR_TEST {
+        csa.decrypt(TS_SCRAMBLED, &mut buffer);
+    }
+    let diff = now.elapsed().as_micros() as f64;
 
-    // println!(
-    //     "speed={:.4} Mbit/s\n",
-    //     (184 * TS_PKTS_FOR_TEST * 8 * 1000000) as f64 / diff / 1000000.0
-    // );
+    println!(
+        "speed={:.4} Mbit/s\n",
+        (184 * TS_PKTS_FOR_TEST * 8 * 1000000) as f64 / diff / 1000000.0
+    );
 }
