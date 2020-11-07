@@ -3,11 +3,14 @@ use {
 };
 
 
-const KEY_PERM: [usize; 0x40] = [
-    0x11, 0x23, 0x08, 0x06, 0x29, 0x30, 0x1C, 0x14, 0x1B, 0x35, 0x3D, 0x31, 0x12, 0x20, 0x3A, 0x3F,
-    0x17, 0x13, 0x24, 0x26, 0x01, 0x34, 0x1A, 0x00, 0x21, 0x03, 0x0C, 0x0D, 0x38, 0x27, 0x19, 0x28,
-    0x32, 0x22, 0x33, 0x0B, 0x15, 0x2F, 0x1D, 0x39, 0x2C, 0x1E, 0x07, 0x18, 0x16, 0x2E, 0x3C, 0x10,
-    0x3B, 0x04, 0x37, 0x2A, 0x0A, 0x05, 0x09, 0x2B, 0x1F, 0x3E, 0x2D, 0x0E, 0x02, 0x25, 0x0F, 0x36,
+const CW_EXPAND_MAGIC: [u64; 7] = [
+    0x0000000000000000,
+    0x0101010101010101,
+    0x0202020202020202,
+    0x0303030303030303,
+    0x0404040404040404,
+    0x0505050505050505,
+    0x0606060606060606,
 ];
 
 
@@ -213,18 +216,46 @@ macro_rules! s_group {
 }
 
 
-#[inline]
-fn nibble_array(dest: &mut [u8], src: &[u8]) {
-    for i in 0 .. 8 {
-        dest[i * 2    ] = src[i] >> 4;
-        dest[i * 2 + 1] = src[i] & 0x0F;
-    }
+/// Bits permutataion
+///
+/// ```ignore
+/// (((v >> 0) & 1) << arr[0]) | (((v >> 1) & 1) << arr[2]) | ...
+/// ```
+macro_rules! bit_permutation {
+    ($v: ident, $pos:expr, [$next:literal]) => {
+        (($v >> $pos) & 1) << $next
+    };
+
+    ($v: ident, $pos:expr, [$next:literal, $($arr:literal),+ $(,)?]) => {
+        bit_permutation!($v, $pos, [$next]) | bit_permutation!($v, $pos + 1, [$($arr),+])
+    };
+
+    ($v: ident, [$($arr:literal),+ $(,)?]) => {
+        bit_permutation!($v, 0, [$($arr),+])
+    };
 }
 
 
+macro_rules! nibble_rotate_left {
+    ($v: expr) => {
+        (($v << 1) & 0x0F) | (($v >> 3) & 0x01)
+    };
+}
+
+
+/// Expands key with bits permutation
+/// 2.1 Breaking DVB-CSA
 #[inline]
-fn nibble_rotate_left(v: u8) -> u8 {
-    ((v << 1) & 0x0F) | ((v >> 3) & 1)
+fn kk_permutation(data: u64) -> u64 {
+    bit_permutation!(data, [
+        19, 27, 55, 46, 1, 15, 36, 22, 56, 61,
+        39, 21, 54, 58, 50, 28, 7, 29, 51, 6,
+        33, 35, 20, 16, 47, 30, 32, 63, 10, 11,
+        4, 38, 62, 26, 40, 18, 12, 52, 37, 53,
+        23, 59, 41, 17, 31, 0, 25, 43, 44, 14,
+        2, 13, 45, 48, 3, 60, 49, 8, 34, 5,
+        9, 42, 57, 24
+    ])
 }
 
 
@@ -277,39 +308,23 @@ impl Default for Csa {
 
 
 impl Csa {
-    pub fn set_cw(&mut self, cw: &[u8]) {
-        let mut kb: [u8; 64] = unsafe { MaybeUninit::uninit().assume_init() };
+    pub fn set_cw(&mut self, cw: [u8; 8]) {
+        for (i, b) in cw.iter().enumerate() {
+            self.ccw[i * 2    ] = b >> 4;
+            self.ccw[i * 2 + 1] = b & 0x0F;
+        }
 
-        kb[56 .. 64].copy_from_slice(&cw[0 .. 8]);
+        let mut tmp = u64::from_le_bytes(cw);
 
-        nibble_array(&mut self.ccw, cw);
+        for (i, m) in CW_EXPAND_MAGIC.iter().enumerate().rev() {
+            let i = i * 8;
+            let k = tmp ^ m;
 
-        for i in (0 ..= 48).rev().step_by(8) {
-            for j in (0 ..= 56).step_by(8) {
-                let v = kb[8 + i + (j >> 3)];
-                self.t[KEY_PERM[j + 0]] = (v >> 7) & 1;
-                self.t[KEY_PERM[j + 1]] = (v >> 6) & 1;
-                self.t[KEY_PERM[j + 2]] = (v >> 5) & 1;
-                self.t[KEY_PERM[j + 3]] = (v >> 4) & 1;
-                self.t[KEY_PERM[j + 4]] = (v >> 3) & 1;
-                self.t[KEY_PERM[j + 5]] = (v >> 2) & 1;
-                self.t[KEY_PERM[j + 6]] = (v >> 1) & 1;
-                self.t[KEY_PERM[j + 7]] = (v     ) & 1;
+            for j in 0 .. 8 {
+                self.kk[i + j] = (k >> (j * 8)) as u8;
             }
 
-            for j in (0 ..= 56).step_by(8) {
-                let v = i + (j >> 3);
-                kb[v] =
-                    self.t[j + 0] << 7 |
-                    self.t[j + 1] << 6 |
-                    self.t[j + 2] << 5 |
-                    self.t[j + 3] << 4 |
-                    self.t[j + 4] << 3 |
-                    self.t[j + 5] << 2 |
-                    self.t[j + 6] << 1 |
-                    self.t[j + 7]      ;
-                self.kk[v] = kb[8 + v] ^ (i >> 3) as u8;
-            }
+            tmp = kk_permutation(tmp);
         }
     }
 
@@ -472,7 +487,7 @@ impl Csa {
                     self.a[skip + 10],
                     self.x,
                     self.d,
-                    (sb[i] >> ((1 - j & 1) << 2)) & 0x0F
+                    (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F
                 );
 
                 self.b[skip] = bb_xor!(
@@ -482,7 +497,7 @@ impl Csa {
                     (sb[i] >> ((j & 1) << 2)) & 0x0F
                 );
 
-                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left(self.b[skip]));
+                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left!(self.b[skip]));
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);
@@ -511,7 +526,7 @@ impl Csa {
                     self.b[skip + 7]
                 );
 
-                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left(self.b[skip]));
+                self.b[skip] = bb_if!(self.p, self.b[skip], nibble_rotate_left!(self.b[skip]));
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);
