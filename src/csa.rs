@@ -99,19 +99,19 @@ const SBOX6: [u8; 0x20] = [
 ];
 
 
-const SBOX7P: [u8; 0x20] = [
-    0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-    0xFF, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0x00,
-    0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF,
-    0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0xFF,
+const SBOX7P: [Bit; 0x20] = [
+    Bit::B0, Bit::B1, Bit::B1, Bit::B1, Bit::B1, Bit::B0, Bit::B0, Bit::B0,
+    Bit::B1, Bit::B0, Bit::B0, Bit::B1, Bit::B0, Bit::B1, Bit::B1, Bit::B0,
+    Bit::B0, Bit::B0, Bit::B1, Bit::B1, Bit::B0, Bit::B0, Bit::B0, Bit::B1,
+    Bit::B1, Bit::B1, Bit::B0, Bit::B0, Bit::B1, Bit::B1, Bit::B0, Bit::B1,
 ];
 
 
-const SBOX7Q: [u8; 0x20] = [
-    0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF,
-    0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF,
-    0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00,
-    0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00,
+const SBOX7Q: [Bit; 0x20] = [
+    Bit::B0, Bit::B1, Bit::B0, Bit::B0, Bit::B1, Bit::B0, Bit::B0, Bit::B1,
+    Bit::B1, Bit::B0, Bit::B1, Bit::B1, Bit::B1, Bit::B0, Bit::B0, Bit::B1,
+    Bit::B1, Bit::B0, Bit::B1, Bit::B1, Bit::B0, Bit::B1, Bit::B1, Bit::B0,
+    Bit::B0, Bit::B1, Bit::B1, Bit::B0, Bit::B0, Bit::B1, Bit::B0, Bit::B0,
 ];
 
 
@@ -167,9 +167,9 @@ pub struct Csa {
     e: Nibble,
     f: Nibble,
 
-    r: u8,
-    p: u8,
-    q: u8,
+    r: Bit,
+    p: Bit,
+    q: Bit,
 }
 
 
@@ -190,9 +190,9 @@ impl Default for Csa {
             d: Nibble::N0,
             e: Nibble::N0,
             f: Nibble::N0,
-            r: 0,
-            p: 0,
-            q: 0,
+            r: Bit::B0,
+            p: Bit::B0,
+            q: Bit::B0,
         }
     }
 }
@@ -260,9 +260,9 @@ impl Csa {
         self.d = Nibble::N0;
         self.e = Nibble::N0;
         self.f = Nibble::N0;
-        self.r = 0;
-        self.p = 0;
-        self.q = 0;
+        self.r = Bit::B0;
+        self.p = Bit::B0;
+        self.q = Bit::B0;
     }
 
     fn b_group_xor(&mut self, skip: usize) {
@@ -296,12 +296,14 @@ impl Csa {
         self.d = self.e ^ self.z ^ tmp;
 
         let tmp = self.f;
-        if self.q != 0 {
+
+        // TODO: replace with bit math
+        if self.q.unwrap() != 0 {
             // TODO: replace
             let z = (self.z.3 << 3) | (self.z.2 << 2) | (self.z.1 << 1) | self.z.0;
             let e = (self.e.3 << 3) | (self.e.2 << 2) | (self.e.1 << 1) | self.e.0;
-            let f = z.unwrap() + e.unwrap() + self.r;
-            self.r = f >> 4;
+            let f = z.unwrap() + e.unwrap() + self.r.unwrap();
+            self.r = Bit::new(f >> 4);
             self.f = Nibble::new(
                 Bit::new(f),
                 Bit::new(f >> 1),
@@ -317,86 +319,87 @@ impl Csa {
     fn a_group_xor(&mut self, skip: usize) {
         // TODO: bit-ops instead of s-boxes
         let s1 = bb_or!(
-            self.a[skip + 4].0 << 4,
-            self.a[skip + 1].2 << 3,
-            self.a[skip + 6].1 << 2,
-            self.a[skip + 7].3 << 1,
-            self.a[skip + 9].0
+            self.a[skip + 4].0.unwrap() << 4,
+            self.a[skip + 1].2.unwrap() << 3,
+            self.a[skip + 6].1.unwrap() << 2,
+            self.a[skip + 7].3.unwrap() << 1,
+            self.a[skip + 9].0.unwrap()
         );
         let s1 = SBOX1[s1 as usize];
 
         let s2 = bb_or!(
-            self.a[skip + 2].1 << 4,
-            self.a[skip + 3].2 << 3,
-            self.a[skip + 6].3 << 2,
-            self.a[skip + 7].0 << 1,
-            self.a[skip + 9].1
+            self.a[skip + 2].1.unwrap() << 4,
+            self.a[skip + 3].2.unwrap() << 3,
+            self.a[skip + 6].3.unwrap() << 2,
+            self.a[skip + 7].0.unwrap() << 1,
+            self.a[skip + 9].1.unwrap()
         );
         let s2 = SBOX2[s2 as usize];
 
         let s3 = bb_or!(
-            self.a[skip + 1].3 << 4,
-            self.a[skip + 2].0 << 3,
-            self.a[skip + 5].1 << 2,
-            self.a[skip + 5].3 << 1,
-            self.a[skip + 6].2
+            self.a[skip + 1].3.unwrap() << 4,
+            self.a[skip + 2].0.unwrap() << 3,
+            self.a[skip + 5].1.unwrap() << 2,
+            self.a[skip + 5].3.unwrap() << 1,
+            self.a[skip + 6].2.unwrap()
         );
         let s3 = SBOX3[s3 as usize];
 
         let s4 = bb_or!(
-            self.a[skip + 3].3 << 4,
-            self.a[skip + 1].1 << 3,
-            self.a[skip + 2].3 << 2,
-            self.a[skip + 4].2 << 1,
-            self.a[skip + 8].0
+            self.a[skip + 3].3.unwrap() << 4,
+            self.a[skip + 1].1.unwrap() << 3,
+            self.a[skip + 2].3.unwrap() << 2,
+            self.a[skip + 4].2.unwrap() << 1,
+            self.a[skip + 8].0.unwrap()
         );
         let s4 = SBOX4[s4 as usize];
 
         let s5 = bb_or!(
-            self.a[skip + 5].2 << 4,
-            self.a[skip + 4].3 << 3,
-            self.a[skip + 6].0 << 2,
-            self.a[skip + 8].1 << 1,
-            self.a[skip + 9].2
+            self.a[skip + 5].2.unwrap() << 4,
+            self.a[skip + 4].3.unwrap() << 3,
+            self.a[skip + 6].0.unwrap() << 2,
+            self.a[skip + 8].1.unwrap() << 1,
+            self.a[skip + 9].2.unwrap()
         );
         let s5 = SBOX5[s5 as usize];
 
         let s6 = bb_or!(
-            self.a[skip + 3].1 << 4,
-            self.a[skip + 4].1 << 3,
-            self.a[skip + 5].0 << 2,
-            self.a[skip + 7].2 << 1,
-            self.a[skip + 9].3
+            self.a[skip + 3].1.unwrap() << 4,
+            self.a[skip + 4].1.unwrap() << 3,
+            self.a[skip + 5].0.unwrap() << 2,
+            self.a[skip + 7].2.unwrap() << 1,
+            self.a[skip + 9].3.unwrap()
         );
         let s6 = SBOX6[s6 as usize];
 
         let s7 = bb_or!(
-            self.a[skip + 2].2 << 4,
-            self.a[skip + 3].0 << 3,
-            self.a[skip + 7].1 << 2,
-            self.a[skip + 8].2 << 1,
-            self.a[skip + 8].3
+            self.a[skip + 2].2.unwrap() << 4,
+            self.a[skip + 3].0.unwrap() << 3,
+            self.a[skip + 7].1.unwrap() << 2,
+            self.a[skip + 8].2.unwrap() << 1,
+            self.a[skip + 8].3.unwrap()
         );
 
+        // TODO: replace
         self.x = Nibble::new(
-            (s1 >> 1) & 0x01,
-            (s2 >> 1) & 0x01,
-            s3 & 0x01,
-            s4 & 0x01,
+            Bit::new((s1 >> 1) & 0x01),
+            Bit::new((s2 >> 1) & 0x01),
+            Bit::new(s3 & 0x01),
+            Bit::new(s4 & 0x01),
         );
 
         self.y = Nibble::new(
-            (s3 >> 1) & 0x01,
-            (s4 >> 1) & 0x01,
-            s5 & 0x01,
-            s6 & 0x01,
+            Bit::new((s3 >> 1) & 0x01),
+            Bit::new((s4 >> 1) & 0x01),
+            Bit::new(s5 & 0x01),
+            Bit::new(s6 & 0x01),
         );
 
         self.z = Nibble::new(
-            (s5 >> 1) & 0x01,
-            (s6 >> 1) & 0x01,
-            s1 & 0x01,
-            s2 & 0x01,
+            Bit::new((s5 >> 1) & 0x01),
+            Bit::new((s6 >> 1) & 0x01),
+            Bit::new(s1 & 0x01),
+            Bit::new(s2 & 0x01),
         );
 
         self.p = SBOX7P[s7 as usize];
@@ -428,7 +431,8 @@ impl Csa {
                 );
                 self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7] ^ tmp;
 
-                if self.p != 0 {
+                // TODO: replace with bit math
+                if self.p.unwrap() != 0 {
                     self.b[skip] = self.b[skip].rotate_left();
                 }
 
@@ -449,7 +453,8 @@ impl Csa {
                 self.a[skip] = self.a[skip + 10] ^ self.x;
                 self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7];
 
-                if self.p != 0 {
+                // TODO: replace with bit math
+                if self.p.unwrap() != 0 {
                     self.b[skip] = self.b[skip].rotate_left();
                 }
 

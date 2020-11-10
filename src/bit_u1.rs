@@ -17,6 +17,7 @@ impl Bit {
     pub const fn new(bit: u8) -> Self { Bit(bit & 0x01) }
 
     pub const B0: Bit = Bit::new(0);
+    pub const B1: Bit = Bit::new(1);
 
     // TODO: many packets
     pub fn unwrap(&self) -> u8 { self.0 }
