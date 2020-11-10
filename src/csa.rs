@@ -261,7 +261,12 @@ impl Csa {
     /// Binary logic generated with Logic Minimizer
     fn a_group_xor(&mut self, skip: usize) {
 
-        // sbox1 = [ 2,0,1,1,2,3,3,0, 3,2,2,0,1,1,0,3, 0,3,3,0,2,2,1,1, 2,2,0,3,1,1,3,0 ]
+        // const SBOX1: [u8; 0x20] = [
+        //     2, 0, 1, 1, 2, 3, 3, 0,
+        //     3, 2, 2, 0, 1, 1, 0, 3,
+        //     0, 3, 3, 0, 2, 2, 1, 1,
+        //     2, 2, 0, 3, 1, 1, 3, 0,
+        // ];
 
         let a = self.a[skip + 4].0;
         let b = self.a[skip + 1].2;
@@ -287,7 +292,24 @@ impl Csa {
             (!d & (b ^ c)) |
             (!a & !e & (b ^ c)) ;
 
-        // sbox2 = [ 3,1,0,2,2,3,3,0, 1,3,2,1,0,0,1,2, 3,1,0,3,3,2,0,2, 0,0,1,2,2,1,3,1 ]
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX1[tmp as usize];
+        // let s1a = Bit::new((tmp >> 0) & 0x01);
+        // let s1b = Bit::new((tmp >> 1) & 0x01);
+
+        // ---
+
+        // const SBOX2: [u8; 0x20] = [
+        //     3, 1, 0, 2, 2, 3, 3, 0,
+        //     1, 3, 2, 1, 0, 0, 1, 2,
+        //     3, 1, 0, 3, 3, 2, 0, 2,
+        //     0, 0, 1, 2, 2, 1, 3, 1,
+        // ];
 
         let a = self.a[skip + 2].1;
         let b = self.a[skip + 3].2;
@@ -313,7 +335,24 @@ impl Csa {
             (!b & !d & !e) |
             (c & !e & !(a ^ b)) ;
 
-        // sbox3 = [ 2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1 ]
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX2[tmp as usize];
+        // let s2a = Bit::new((tmp >> 0) & 0x01);
+        // let s2b = Bit::new((tmp >> 1) & 0x01);
+
+        // ---
+
+        // const SBOX3: [u8; 0x20] = [
+        //     2, 0, 1, 2, 2, 3, 3, 1,
+        //     1, 1, 0, 3, 3, 0, 2, 0,
+        //     1, 3, 0, 1, 3, 0, 2, 2,
+        //     2, 0, 1, 2, 0, 3, 3, 1,
+        // ];
 
         let a = self.a[skip + 1].3;
         let b = self.a[skip + 2].0;
@@ -336,7 +375,24 @@ impl Csa {
             (c & d & !e) |
             (!b & c & !(a ^ d)) ;
 
-        // sbox4 = [ 3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1 ]
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX3[tmp as usize];
+        // let s3a = Bit::new((tmp >> 0) & 0x01);
+        // let s3b = Bit::new((tmp >> 1) & 0x01);
+
+        // ---
+
+        // const SBOX4: [u8; 0x20] = [
+        //     3, 1, 2, 3, 0, 2, 1, 2,
+        //     1, 2, 0, 1, 3, 0, 0, 3,
+        //     1, 0, 3, 1, 2, 3, 0, 3,
+        //     0, 3, 2, 0, 1, 2, 2, 1,
+        // ];
 
         let a = self.a[skip + 3].3;
         let b = self.a[skip + 1].1;
@@ -364,7 +420,24 @@ impl Csa {
             (b & !c & !d & e) |
             (!a & !b & !c & d) ;
 
-        // sbox5 = [ 2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2 ]
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX4[tmp as usize];
+        // let s4a = Bit::new((tmp >> 0) & 0x01);
+        // let s4b = Bit::new((tmp >> 1) & 0x01);
+
+        // ---
+
+        // const SBOX5: [u8; 0x20] = [
+        //     2, 0, 0, 1, 3, 2, 3, 2,
+        //     0, 1, 3, 3, 1, 0, 2, 1,
+        //     2, 3, 2, 0, 0, 3, 1, 1,
+        //     1, 0, 3, 2, 3, 1, 0, 2,
+        // ];
 
         let a = self.a[skip + 5].2;
         let b = self.a[skip + 4].3;
@@ -391,7 +464,24 @@ impl Csa {
             (b & !c & d) |
             (!a & !b & c);
 
-        // sbox6 = [ 0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0 ]
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX5[tmp as usize];
+        // let s5a = Bit::new((tmp >> 0) & 0x01);
+        // let s5b = Bit::new((tmp >> 1) & 0x01);
+
+        // ---
+
+        // const SBOX6: [u8; 0x20] = [
+        //     0, 1, 2, 3, 1, 2, 2, 0,
+        //     0, 1, 3, 0, 2, 3, 1, 3,
+        //     2, 3, 0, 2, 3, 0, 1, 1,
+        //     2, 1, 1, 2, 0, 3, 3, 0,
+        // ];
 
         let a = self.a[skip + 3].1;
         let b = self.a[skip + 4].1;
@@ -417,13 +507,30 @@ impl Csa {
             (!c & !e & (a ^ d)) |
             (!b & !c & (a ^ d));
 
-        // set X, Y, Z
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX6[tmp as usize];
+        // let s6a = Bit::new((tmp >> 0) & 0x01);
+        // let s6b = Bit::new((tmp >> 1) & 0x01);
+
+        // --- set X, Y, Z
 
         self.x = Nibble::new(s1b, s2b, s3a, s4a);
         self.y = Nibble::new(s3b, s4b, s5a, s6a);
         self.z = Nibble::new(s5b, s6b, s1a, s2a);
 
-        // sbox7 = [ 0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2 ]
+        // ---
+
+        // const SBOX7: [u8; 0x20] = [
+        //     0, 3, 2, 2, 3, 0, 0, 1,
+        //     3, 0, 1, 3, 1, 2, 2, 1,
+        //     1, 0, 3, 3, 0, 1, 1, 2,
+        //     2, 3, 1, 0, 2, 3, 0, 2,
+        // ];
 
         let a = self.a[skip + 2].2;
         let b = self.a[skip + 3].0;
@@ -448,6 +555,16 @@ impl Csa {
             (b & !d & !(c ^ e)) |
             (d & e & !(a ^ c)) |
             (!a & !b & !c & e) ;
+
+        // let tmp =
+        //     a.unwrap() << 4 |
+        //     b.unwrap() << 3 |
+        //     c.unwrap() << 2 |
+        //     d.unwrap() << 1 |
+        //     e.unwrap();
+        // let tmp = SBOX7[tmp as usize];
+        // self.q = Bit::new((tmp >> 0) & 0x01);
+        // self.p = Bit::new((tmp >> 1) & 0x01);
     }
 
     fn stream_cypher_init(&mut self, sb: &[u8]) {
