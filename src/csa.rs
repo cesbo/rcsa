@@ -51,57 +51,6 @@ const BLOCK_PERM: [u8; 0x100] = [
 ];
 
 
-const SBOX3: [u8; 0x20] = [
-    2,0,1,2,2,3,3,1,
-    1,1,0,3,3,0,2,0,
-    1,3,0,1,3,0,2,2,
-    2,0,1,2,0,3,3,1
-];
-
-
-const SBOX4: [u8; 0x20] = [
-    3,1,2,3,0,2,1,2,
-    1,2,0,1,3,0,0,3,
-    1,0,3,1,2,3,0,3,
-    0,3,2,0,1,2,2,1
-];
-
-
-const SBOX5: [u8; 0x20] = [
-    2,0,0,1,3,2,3,2,
-    0,1,3,3,1,0,2,1,
-    2,3,2,0,0,3,1,1,
-    1,0,3,2,3,1,0,2
-];
-
-
-const SBOX6: [u8; 0x20] = [
-    0,1,2,3,1,2,2,0,
-    0,1,3,0,2,3,1,3,
-    2,3,0,2,3,0,1,1,
-    2,1,1,2,0,3,3,0
-];
-
-
-macro_rules! bb_or {
-    ($v1: expr, $v2: expr) => {
-        $v1 | $v2
-    };
-
-    ($v1: expr, $v2: expr, $v3: expr) => {
-        $v1 | $v2 | $v3
-    };
-
-    ($v1: expr, $v2: expr, $v3: expr, $v4: expr) => {
-        $v1 | $v2 | $v3 | $v4
-    };
-
-    ($v1: expr, $v2: expr, $v3: expr, $v4: expr, $v5: expr) => {
-        $v1 | $v2 | $v3 | $v4 | $v5
-    };
-}
-
-
 /// Sum 1-bit with carry:
 ///
 /// ```ignore
@@ -364,43 +313,115 @@ impl Csa {
             (!b & !d & !e) |
             (c & !e & !(a ^ b)) ;
 
-        // TODO: bit-ops instead of s-boxes
+        // sbox3 = [ 2,0,1,2,2,3,3,1, 1,1,0,3,3,0,2,0, 1,3,0,1,3,0,2,2, 2,0,1,2,0,3,3,1 ]
 
-        let s3 = bb_or!(
-            self.a[skip + 1].3.unwrap() << 4,
-            self.a[skip + 2].0.unwrap() << 3,
-            self.a[skip + 5].1.unwrap() << 2,
-            self.a[skip + 5].3.unwrap() << 1,
-            self.a[skip + 6].2.unwrap()
-        );
-        let s3 = SBOX3[s3 as usize];
+        let a = self.a[skip + 1].3;
+        let b = self.a[skip + 2].0;
+        let c = self.a[skip + 5].1;
+        let d = self.a[skip + 5].3;
+        let e = self.a[skip + 6].2;
 
-        let s4 = bb_or!(
-            self.a[skip + 3].3.unwrap() << 4,
-            self.a[skip + 1].1.unwrap() << 3,
-            self.a[skip + 2].3.unwrap() << 2,
-            self.a[skip + 4].2.unwrap() << 1,
-            self.a[skip + 8].0.unwrap()
-        );
-        let s4 = SBOX4[s4 as usize];
+        let s3a =
+            (!e & (a ^ b ^ d)) |
+            (e & (a ^ b ^ c)) ;
 
-        let s5 = bb_or!(
-            self.a[skip + 5].2.unwrap() << 4,
-            self.a[skip + 4].3.unwrap() << 3,
-            self.a[skip + 6].0.unwrap() << 2,
-            self.a[skip + 8].1.unwrap() << 1,
-            self.a[skip + 9].2.unwrap()
-        );
-        let s5 = SBOX5[s5 as usize];
+        let s3b =
+            (!a & !b & !d & !e) |
+            (!a & !c & d & e) |
+            (!a & c & !e) |
+            (a & b & c & !d & e) |
+            (a & !c & !d & (b ^ e)) |
+            (!b & c & !e) |
+            (b & !c & d & e) |
+            (c & d & !e) |
+            (!b & c & !(a ^ d)) ;
 
-        let s6 = bb_or!(
-            self.a[skip + 3].1.unwrap() << 4,
-            self.a[skip + 4].1.unwrap() << 3,
-            self.a[skip + 5].0.unwrap() << 2,
-            self.a[skip + 7].2.unwrap() << 1,
-            self.a[skip + 9].3.unwrap()
-        );
-        let s6 = SBOX6[s6 as usize];
+        // sbox4 = [ 3,1,2,3,0,2,1,2, 1,2,0,1,3,0,0,3, 1,0,3,1,2,3,0,3, 0,3,2,0,1,2,2,1 ]
+
+        let a = self.a[skip + 3].3;
+        let b = self.a[skip + 1].1;
+        let c = self.a[skip + 2].3;
+        let d = self.a[skip + 4].2;
+        let e = self.a[skip + 8].0;
+
+        let s4a =
+            (!a & !b & c & d & !e) |
+            (!a & !c & !(d ^ e)) |
+            (a & !b & c & e) |
+            (a & b & !c & !d & e) |
+            (b & c & !d & !e) |
+            (d & e & !(b ^ c)) |
+            (!b & !c & (a ^ e)) ;
+
+        let s4b =
+            (!a & !b & !c & !e) |
+            (!a & b & c & !d & !e) |
+            (!a & c & d & e) |
+            (a & !b & c & !d) |
+            (a & b & (d ^ e)) |
+            (!b & !c & d & !e) |
+            (!b & c & e) |
+            (b & !c & !d & e) |
+            (!a & !b & !c & d) ;
+
+        // sbox5 = [ 2,0,0,1,3,2,3,2, 0,1,3,3,1,0,2,1, 2,3,2,0,0,3,1,1, 1,0,3,2,3,1,0,2 ]
+
+        let a = self.a[skip + 5].2;
+        let b = self.a[skip + 4].3;
+        let c = self.a[skip + 6].0;
+        let d = self.a[skip + 8].1;
+        let e = self.a[skip + 9].2;
+
+        let s5a =
+            (!a & b & d & e) |
+            (!a & !c & d & e) |
+            (!a & c & !d & !e) |
+            (a & !b & !d & e) |
+            (a & c & (b ^ d)) |
+            (b & !c & (a ^ e)) |
+            (b & !c & d & !e) |
+            (!a & !b & c & !e);
+
+        let s5b =
+            (!a & c & d & !e) |
+            (a & !b & !c & !e) |
+            (a & b & c & !d & !e) |
+            (a & e & !(b ^ d)) |
+            (!b & !c & !d & !e) |
+            (b & !c & d) |
+            (!a & !b & c);
+
+        // sbox6 = [ 0,1,2,3,1,2,2,0, 0,1,3,0,2,3,1,3, 2,3,0,2,3,0,1,1, 2,1,1,2,0,3,3,0 ]
+
+        let a = self.a[skip + 3].1;
+        let b = self.a[skip + 4].1;
+        let c = self.a[skip + 5].0;
+        let d = self.a[skip + 7].2;
+        let e = self.a[skip + 9].3;
+
+        let s6a =
+            (!b & c & !d & !e) |
+            (b & (d ^ e)) |
+            (!c & !d & e) |
+            (c & d & (a ^ b)) |
+            (!a & !b & !c & e);
+
+        let s6b =
+            (!a & b & c & !d) |
+            (!a & b & c & e) |
+            (!a & c & !d & e) |
+            (a & b & c & d & !e) |
+            (a & !c & d & e) |
+            (!b & !e & (a ^ d)) |
+            (b & c & !d & e) |
+            (!c & !e & (a ^ d)) |
+            (!b & !c & (a ^ d));
+
+        // set X, Y, Z
+
+        self.x = Nibble::new(s1b, s2b, s3a, s4a);
+        self.y = Nibble::new(s3b, s4b, s5a, s6a);
+        self.z = Nibble::new(s5b, s6b, s1a, s2a);
 
         // sbox7 = [ 0,3,2,2,3,0,0,1, 3,0,1,3,1,2,2,1, 1,0,3,3,0,1,1,2, 2,3,1,0,2,3,0,2 ]
 
@@ -427,28 +448,6 @@ impl Csa {
             (b & !d & !(c ^ e)) |
             (d & e & !(a ^ c)) |
             (!a & !b & !c & e) ;
-
-        // TODO: replace
-        self.x = Nibble::new(
-            s1b,
-            s2b,
-            Bit::new(s3 & 0x01),
-            Bit::new(s4 & 0x01),
-        );
-
-        self.y = Nibble::new(
-            Bit::new((s3 >> 1) & 0x01),
-            Bit::new((s4 >> 1) & 0x01),
-            Bit::new(s5 & 0x01),
-            Bit::new(s6 & 0x01),
-        );
-
-        self.z = Nibble::new(
-            Bit::new((s5 >> 1) & 0x01),
-            Bit::new((s6 >> 1) & 0x01),
-            s1a,
-            s2a,
-        );
     }
 
     fn stream_cypher_init(&mut self, sb: &[u8]) {
