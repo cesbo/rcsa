@@ -4,6 +4,7 @@ use {
             BitAnd,
             BitOr,
             BitXor,
+            Not,
             Shl,
         },
     },
@@ -48,6 +49,15 @@ impl BitXor for Bit {
 
     fn bitxor(self, rhs: Self) -> Self::Output {
         Bit(self.0 ^ rhs.0)
+    }
+}
+
+
+impl Not for Bit {
+    type Output = Bit;
+
+    fn not(self) -> Self::Output {
+        Bit((!self.0) & 0x01)
     }
 }
 
