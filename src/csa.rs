@@ -189,6 +189,26 @@ fn sum_nibble(z: Nibble, e: Nibble, r: Bit, q: Bit) -> (Nibble, Bit) {
 }
 
 
+/// Equal to:
+///
+/// ```ignore
+/// if p != 0 {
+///     ((n << 1) & 0x0F) | ((n >> 3) & 0x01)
+/// } else {
+///     n
+/// }
+/// ```
+#[inline]
+fn rotate_nibble(n: Nibble, p: Bit) -> Nibble {
+    Nibble::new(
+        n.0 ^ (p & (n.3 ^ n.0)),
+        n.1 ^ (p & (n.0 ^ n.1)),
+        n.2 ^ (p & (n.1 ^ n.2)),
+        n.3 ^ (p & (n.2 ^ n.3)),
+    )
+}
+
+
 #[derive(Debug)]
 pub struct Csa {
     ccw: [Nibble; 16],
@@ -434,12 +454,9 @@ impl Csa {
                     Bit::new(tmp >> 2),
                     Bit::new(tmp >> 3),
                 );
-                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7] ^ tmp;
 
-                // TODO: replace with bit math
-                if self.p.unwrap() != 0 {
-                    self.b[skip] = self.b[skip].rotate_left();
-                }
+                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7] ^ tmp;
+                self.b[skip] = rotate_nibble(self.b[skip], self.p);
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);
@@ -456,12 +473,9 @@ impl Csa {
                 let skip = 31 - i * 4 - j;
 
                 self.a[skip] = self.a[skip + 10] ^ self.x;
-                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7];
 
-                // TODO: replace with bit math
-                if self.p.unwrap() != 0 {
-                    self.b[skip] = self.b[skip].rotate_left();
-                }
+                self.b[skip] = self.b[skip + 10] ^ self.y ^ self.b[skip + 7];
+                self.b[skip] = rotate_nibble(self.b[skip], self.p);
 
                 self.b_group_xor(skip);
                 self.a_group_xor(skip);

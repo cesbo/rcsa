@@ -20,10 +20,6 @@ impl Nibble {
 
     pub const N0: Self = Nibble::new(Bit::B0, Bit::B0, Bit::B0, Bit::B0);
 
-    pub fn rotate_left(&self) -> Self {
-        Nibble (self.3, self.0, self.1, self.2)
-    }
-
     // TODO: unwrap many packets
     pub fn unwrap(&self) -> u8 {
         self.0.unwrap() |
