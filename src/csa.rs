@@ -134,18 +134,58 @@ macro_rules! bb_or {
 }
 
 
-macro_rules! bb_xor {
-    ($v1: expr, $v2: expr) => {
-        $v1 ^ $v2
-    };
+/// Sum 1-bit with carry:
+///
+/// ```ignore
+/// a + b == (a ^ b) | ((a & b) << 1)
+/// ```
+///
+/// Condition:
+///
+/// ```ignore
+/// (if q != 0 { a } else { b }) == (b ^ (q & (a ^ b)))
+/// ```
+///
+/// if `$q` bit is set returns sum of `$z` and `$e` with carry of sum or `$r`
+/// otherwise return `$e` and `$r`
+///
+/// ```ignore
+/// let b = z ^ e;
+/// let c = z & e;
+/// let result = e ^ (q & (z ^ carry));
+/// let carry = c | (b & carry);
+/// ```
+#[inline]
+fn sum_bit(z: Bit, e: Bit, carry: Bit, q: Bit) -> (Bit, Bit) {
+    (
+        e ^ (q & (z ^ carry)),
+        (z & e) | ((z ^ e) & carry)
+    )
+}
 
-    ($v1: expr, $v2: expr, $v3: expr) => {
-        $v1 ^ $v2 ^ $v3
-    };
 
-    ($v1: expr, $v2: expr, $v3: expr, $v4: expr) => {
-        $v1 ^ $v2 ^ $v3 ^ $v4
-    };
+/// Equal to:
+///
+/// ```ignore
+/// if q != 0 {
+///     let next_f = z + e + r;
+///     (next_f & 0x0F, next_f >> 4)
+/// } else {
+///     (e, r)
+/// }
+/// ```
+#[inline]
+fn sum_nibble(z: Nibble, e: Nibble, r: Bit, q: Bit) -> (Nibble, Bit) {
+    let carry = r;
+    let (r0, carry) = sum_bit(z.0, e.0, carry, q);
+    let (r1, carry) = sum_bit(z.1, e.1, carry, q);
+    let (r2, carry) = sum_bit(z.2, e.2, carry, q);
+    let (r3, carry) = sum_bit(z.3, e.3, carry, q);
+
+    (
+        Nibble::new(r0, r1, r2, r3),
+        r ^ (q & (carry ^ r)),
+    )
 }
 
 
@@ -267,53 +307,18 @@ impl Csa {
 
     fn b_group_xor(&mut self, skip: usize) {
         let tmp = Nibble::new(
-            bb_xor!(
-                self.b[skip + 9].2,
-                self.b[skip + 6].3,
-                self.b[skip + 3].1,
-                self.b[skip + 8].0
-            ),
-            bb_xor!(
-                self.b[skip + 5].3,
-                self.b[skip + 8].2,
-                self.b[skip + 4].0,
-                self.b[skip + 5].1
-            ),
-            bb_xor!(
-                self.b[skip + 6].0,
-                self.b[skip + 8].1,
-                self.b[skip + 3].3,
-                self.b[skip + 4].2
-            ),
-            bb_xor!(
-                self.b[skip + 3].0,
-                self.b[skip + 6].1,
-                self.b[skip + 7].2,
-                self.b[skip + 9].3
-            ),
+            self.b[skip + 9].2 ^ self.b[skip + 6].3 ^ self.b[skip + 3].1 ^ self.b[skip + 8].0,
+            self.b[skip + 5].3 ^ self.b[skip + 8].2 ^ self.b[skip + 4].0 ^ self.b[skip + 5].1,
+            self.b[skip + 6].0 ^ self.b[skip + 8].1 ^ self.b[skip + 3].3 ^ self.b[skip + 4].2,
+            self.b[skip + 3].0 ^ self.b[skip + 6].1 ^ self.b[skip + 7].2 ^ self.b[skip + 9].3,
         );
 
         self.d = self.e ^ self.z ^ tmp;
 
-        let tmp = self.f;
-
-        // TODO: replace with bit math
-        if self.q.unwrap() != 0 {
-            // TODO: replace
-            let z = (self.z.3 << 3) | (self.z.2 << 2) | (self.z.1 << 1) | self.z.0;
-            let e = (self.e.3 << 3) | (self.e.2 << 2) | (self.e.1 << 1) | self.e.0;
-            let f = z.unwrap() + e.unwrap() + self.r.unwrap();
-            self.r = Bit::new(f >> 4);
-            self.f = Nibble::new(
-                Bit::new(f),
-                Bit::new(f >> 1),
-                Bit::new(f >> 2),
-                Bit::new(f >> 3),
-            );
-        } else {
-            self.f = self.e;
-        }
-        self.e = tmp;
+        let (f, r) = sum_nibble(self.z, self.e, self.r, self.q);
+        self.e = self.f;
+        self.f = f;
+        self.r = r;
     }
 
     fn a_group_xor(&mut self, skip: usize) {

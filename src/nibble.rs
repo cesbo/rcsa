@@ -29,7 +29,7 @@ impl Nibble {
         self.0.unwrap() |
         self.1.unwrap() << 1 |
         self.2.unwrap() << 2 |
-        self.3.unwrap()
+        self.3.unwrap() << 3
     }
 }
 

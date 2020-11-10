@@ -1,6 +1,7 @@
 use {
     std::{
         ops::{
+            BitAnd,
             BitOr,
             BitXor,
             Shl,
@@ -24,10 +25,19 @@ impl Bit {
 }
 
 
+impl BitAnd for Bit {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Bit(self.0 & rhs.0)
+    }
+}
+
+
 impl BitOr for Bit {
     type Output = Self;
 
-    fn bitor(self, rhs: Self) -> Self {
+    fn bitor(self, rhs: Self) -> Self::Output {
         Bit(self.0 | rhs.0)
     }
 }
@@ -45,7 +55,7 @@ impl BitXor for Bit {
 impl Shl<usize> for Bit {
     type Output = Self;
 
-    fn shl(self, rsh: usize) -> Self {
+    fn shl(self, rsh: usize) -> Self::Output {
         Bit(self.0 << rsh)
     }
 }
