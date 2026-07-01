@@ -1,12 +1,8 @@
-use {
-    std::mem::MaybeUninit,
-    crate::{
-        key::expand_key,
-        Bit,
-        Nibble,
-    },
+use crate::{
+    Bit,
+    Nibble,
+    key::expand_key,
 };
-
 
 // Block cypher
 
@@ -29,7 +25,6 @@ const BLOCK_SBOX: [u8; 0x100] = [
     0xAD, 0x46, 0x0B, 0xAF, 0x80, 0x52, 0x2C, 0xFA, 0x8C, 0x89, 0x66, 0xFD, 0xB2, 0xA9, 0x9B, 0xC0,
 ];
 
-
 // bit_permutation!(sbox_out, [1, 7, 5, 4, 2, 6, 0, 3])
 const BLOCK_PERM: [u8; 0x100] = [
     0x00, 0x02, 0x80, 0x82, 0x20, 0x22, 0xA0, 0xA2, 0x10, 0x12, 0x90, 0x92, 0x30, 0x32, 0xB0, 0xB2,
@@ -49,7 +44,6 @@ const BLOCK_PERM: [u8; 0x100] = [
     0x49, 0x4B, 0xC9, 0xCB, 0x69, 0x6B, 0xE9, 0xEB, 0x59, 0x5B, 0xD9, 0xDB, 0x79, 0x7B, 0xF9, 0xFB,
     0x4D, 0x4F, 0xCD, 0xCF, 0x6D, 0x6F, 0xED, 0xEF, 0x5D, 0x5F, 0xDD, 0xDF, 0x7D, 0x7F, 0xFD, 0xFF,
 ];
-
 
 /// Sum 1-bit with carry:
 ///
@@ -74,12 +68,8 @@ const BLOCK_PERM: [u8; 0x100] = [
 /// ```
 #[inline]
 fn sum_bit(z: Bit, e: Bit, carry: Bit, q: Bit) -> (Bit, Bit) {
-    (
-        e ^ (q & (z ^ carry)),
-        (z & e) | ((z ^ e) & carry)
-    )
+    (e ^ (q & (z ^ carry)), (z & e) | ((z ^ e) & carry))
 }
-
 
 /// Equal to:
 ///
@@ -99,12 +89,8 @@ fn sum_nibble(z: Nibble, e: Nibble, r: Bit, q: Bit) -> (Nibble, Bit) {
     let (r2, carry) = sum_bit(z.2, e.2, carry, q);
     let (r3, carry) = sum_bit(z.3, e.3, carry, q);
 
-    (
-        Nibble::new(r0, r1, r2, r3),
-        r ^ (q & (carry ^ r)),
-    )
+    (Nibble::new(r0, r1, r2, r3), r ^ (q & (carry ^ r)))
 }
-
 
 /// Equal to:
 ///
@@ -124,7 +110,6 @@ fn rotate_nibble(n: Nibble, p: Bit) -> Nibble {
         n.3 ^ (p & (n.2 ^ n.3)),
     )
 }
-
 
 #[derive(Debug)]
 pub struct Csa {
@@ -149,17 +134,16 @@ pub struct Csa {
     q: Bit,
 }
 
-
 impl Default for Csa {
     fn default() -> Csa {
         Csa {
-            ccw: unsafe { MaybeUninit::uninit().assume_init() },
+            ccw: [Nibble::N0; 16],
 
-            kk: unsafe { MaybeUninit::uninit().assume_init() },
-            t: unsafe { MaybeUninit::uninit().assume_init() },
+            kk: [0; 56],
+            t: [0; 64],
 
-            a: unsafe { MaybeUninit::uninit().assume_init() },
-            b: unsafe { MaybeUninit::uninit().assume_init() },
+            a: [Nibble::N0; 42],
+            b: [Nibble::N0; 42],
 
             x: Nibble::N0,
             y: Nibble::N0,
@@ -174,19 +158,18 @@ impl Default for Csa {
     }
 }
 
-
 impl Csa {
     pub fn set_cw(&mut self, cw: &[u8; 8]) {
-        for i in 0 .. 8 {
-            let tmp = cw[i] >> 4;
-            self.ccw[i * 2    ] = Nibble::new(
+        for (i, cw_item) in cw.iter().enumerate().take(8) {
+            let tmp = *cw_item >> 4;
+            self.ccw[i * 2] = Nibble::new(
                 Bit::new(tmp),
                 Bit::new(tmp >> 1),
                 Bit::new(tmp >> 2),
                 Bit::new(tmp >> 3),
             );
 
-            let tmp = cw[i];
+            let tmp = *cw_item;
             self.ccw[i * 2 + 1] = Nibble::new(
                 Bit::new(tmp),
                 Bit::new(tmp >> 1),
@@ -202,22 +185,20 @@ impl Csa {
         let mut t6: u8 = ib[6];
         let mut sbox_out: u8;
 
-        for i in 0 .. 8 {
-            self.t[56 + i] = ib[i];
-        }
+        self.t[56 .. 64].copy_from_slice(&ib[.. 8]);
 
         for i in (0 ..= 55).rev() {
-            t6 = t6 ^ self.kk[i];
+            t6 ^= self.kk[i];
             sbox_out = BLOCK_SBOX[t6 as usize];
             t6 = self.t[i + 6] ^ BLOCK_PERM[sbox_out as usize];
             self.t[i + 6] = t6;
 
-            sbox_out = sbox_out ^ self.t[i + 8];
+            sbox_out ^= self.t[i + 8];
 
-            self.t[i + 4] = self.t[i + 4] ^ sbox_out;
-            self.t[i + 3] = self.t[i + 3] ^ sbox_out;
-            self.t[i + 2] = self.t[i + 2] ^ sbox_out;
-            self.t[i + 0] = sbox_out;
+            self.t[i + 4] ^= sbox_out;
+            self.t[i + 3] ^= sbox_out;
+            self.t[i + 2] ^= sbox_out;
+            self.t[i] = sbox_out;
         }
     }
 
@@ -260,7 +241,6 @@ impl Csa {
 
     /// Binary logic generated with Logic Minimizer
     fn a_group_xor(&mut self, skip: usize) {
-
         // const SBOX1: [u8; 0x20] = [
         //     2, 0, 1, 1, 2, 3, 3, 0,
         //     3, 2, 2, 0, 1, 1, 0, 3,
@@ -274,23 +254,21 @@ impl Csa {
         let d = self.a[skip + 7].3;
         let e = self.a[skip + 9].0;
 
-        let s1a =
-            (!a & b & !d & !e) |
-            (!a & c & !d & e) |
-            (a & !c & e & !(b ^ d)) |
-            (!b & d& !e) |
-            (b & c & (a ^ e)) |
-            (b & c & !d) |
-            (!b & d & !(a ^ c)) ;
+        let s1a = (!a & b & !d & !e)
+            | (!a & c & !d & e)
+            | (a & !c & e & !(b ^ d))
+            | (!b & d & !e)
+            | (b & c & (a ^ e))
+            | (b & c & !d)
+            | (!b & d & !(a ^ c));
 
-        let s1b =
-            (!a & !b & !d & !e) |
-            (a & !b & !c & d & !e) |
-            (a & b & !c & e) |
-            (a & !c & !d & e) |
-            (b & c & d & (a ^ e)) |
-            (!d & (b ^ c)) |
-            (!a & !e & (b ^ c)) ;
+        let s1b = (!a & !b & !d & !e)
+            | (a & !b & !c & d & !e)
+            | (a & b & !c & e)
+            | (a & !c & !d & e)
+            | (b & c & d & (a ^ e))
+            | (!d & (b ^ c))
+            | (!a & !e & (b ^ c));
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -317,23 +295,21 @@ impl Csa {
         let d = self.a[skip + 7].0;
         let e = self.a[skip + 9].1;
 
-        let s2a =
-            (!a & !c & !d) |
-            (!a & c & d & !e) |
-            (a & b & c & e) |
-            (a & b & d & !e) |
-            (!c & e & (a ^ b)) |
-            (!b & !d & (a ^ e)) ;
+        let s2a = (!a & !c & !d)
+            | (!a & c & d & !e)
+            | (a & b & c & e)
+            | (a & b & d & !e)
+            | (!c & e & (a ^ b))
+            | (!b & !d & (a ^ e));
 
-        let s2b =
-            (!a & b & !c & (d ^ e)) |
-            (!a & b & c & d & e) |
-            (a & !b & d & e) |
-            (a & !c & d & e) |
-            (!b & !c & d & e) |
-            (!b & c & !d) |
-            (!b & !d & !e) |
-            (c & !e & !(a ^ b)) ;
+        let s2b = (!a & b & !c & (d ^ e))
+            | (!a & b & c & d & e)
+            | (a & !b & d & e)
+            | (a & !c & d & e)
+            | (!b & !c & d & e)
+            | (!b & c & !d)
+            | (!b & !d & !e)
+            | (c & !e & !(a ^ b));
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -360,20 +336,17 @@ impl Csa {
         let d = self.a[skip + 5].3;
         let e = self.a[skip + 6].2;
 
-        let s3a =
-            (!e & (a ^ b ^ d)) |
-            (e & (a ^ b ^ c)) ;
+        let s3a = (!e & (a ^ b ^ d)) | (e & (a ^ b ^ c));
 
-        let s3b =
-            (!a & !b & !d & !e) |
-            (!a & !c & d & e) |
-            (!a & c & !e) |
-            (a & b & c & !d & e) |
-            (a & !c & !d & (b ^ e)) |
-            (!b & c & !e) |
-            (b & !c & d & e) |
-            (c & d & !e) |
-            (!b & c & !(a ^ d)) ;
+        let s3b = (!a & !b & !d & !e)
+            | (!a & !c & d & e)
+            | (!a & c & !e)
+            | (a & b & c & !d & e)
+            | (a & !c & !d & (b ^ e))
+            | (!b & c & !e)
+            | (b & !c & d & e)
+            | (c & d & !e)
+            | (!b & c & !(a ^ d));
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -400,25 +373,23 @@ impl Csa {
         let d = self.a[skip + 4].2;
         let e = self.a[skip + 8].0;
 
-        let s4a =
-            (!a & !b & c & d & !e) |
-            (!a & !c & !(d ^ e)) |
-            (a & !b & c & e) |
-            (a & b & !c & !d & e) |
-            (b & c & !d & !e) |
-            (d & e & !(b ^ c)) |
-            (!b & !c & (a ^ e)) ;
+        let s4a = (!a & !b & c & d & !e)
+            | (!a & !c & !(d ^ e))
+            | (a & !b & c & e)
+            | (a & b & !c & !d & e)
+            | (b & c & !d & !e)
+            | (d & e & !(b ^ c))
+            | (!b & !c & (a ^ e));
 
-        let s4b =
-            (!a & !b & !c & !e) |
-            (!a & b & c & !d & !e) |
-            (!a & c & d & e) |
-            (a & !b & c & !d) |
-            (a & b & (d ^ e)) |
-            (!b & !c & d & !e) |
-            (!b & c & e) |
-            (b & !c & !d & e) |
-            (!a & !b & !c & d) ;
+        let s4b = (!a & !b & !c & !e)
+            | (!a & b & c & !d & !e)
+            | (!a & c & d & e)
+            | (a & !b & c & !d)
+            | (a & b & (d ^ e))
+            | (!b & !c & d & !e)
+            | (!b & c & e)
+            | (b & !c & !d & e)
+            | (!a & !b & !c & d);
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -445,24 +416,22 @@ impl Csa {
         let d = self.a[skip + 8].1;
         let e = self.a[skip + 9].2;
 
-        let s5a =
-            (!a & b & d & e) |
-            (!a & !c & d & e) |
-            (!a & c & !d & !e) |
-            (a & !b & !d & e) |
-            (a & c & (b ^ d)) |
-            (b & !c & (a ^ e)) |
-            (b & !c & d & !e) |
-            (!a & !b & c & !e);
+        let s5a = (!a & b & d & e)
+            | (!a & !c & d & e)
+            | (!a & c & !d & !e)
+            | (a & !b & !d & e)
+            | (a & c & (b ^ d))
+            | (b & !c & (a ^ e))
+            | (b & !c & d & !e)
+            | (!a & !b & c & !e);
 
-        let s5b =
-            (!a & c & d & !e) |
-            (a & !b & !c & !e) |
-            (a & b & c & !d & !e) |
-            (a & e & !(b ^ d)) |
-            (!b & !c & !d & !e) |
-            (b & !c & d) |
-            (!a & !b & c);
+        let s5b = (!a & c & d & !e)
+            | (a & !b & !c & !e)
+            | (a & b & c & !d & !e)
+            | (a & e & !(b ^ d))
+            | (!b & !c & !d & !e)
+            | (b & !c & d)
+            | (!a & !b & c);
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -489,23 +458,21 @@ impl Csa {
         let d = self.a[skip + 7].2;
         let e = self.a[skip + 9].3;
 
-        let s6a =
-            (!b & c & !d & !e) |
-            (b & (d ^ e)) |
-            (!c & !d & e) |
-            (c & d & (a ^ b)) |
-            (!a & !b & !c & e);
+        let s6a = (!b & c & !d & !e)
+            | (b & (d ^ e))
+            | (!c & !d & e)
+            | (c & d & (a ^ b))
+            | (!a & !b & !c & e);
 
-        let s6b =
-            (!a & b & c & !d) |
-            (!a & b & c & e) |
-            (!a & c & !d & e) |
-            (a & b & c & d & !e) |
-            (a & !c & d & e) |
-            (!b & !e & (a ^ d)) |
-            (b & c & !d & e) |
-            (!c & !e & (a ^ d)) |
-            (!b & !c & (a ^ d));
+        let s6b = (!a & b & c & !d)
+            | (!a & b & c & e)
+            | (!a & c & !d & e)
+            | (a & b & c & d & !e)
+            | (a & !c & d & e)
+            | (!b & !e & (a ^ d))
+            | (b & c & !d & e)
+            | (!c & !e & (a ^ d))
+            | (!b & !c & (a ^ d));
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -538,23 +505,21 @@ impl Csa {
         let d = self.a[skip + 8].2;
         let e = self.a[skip + 8].3;
 
-        self.q =
-            (!a & c & !(d ^ e)) |
-            (a & !b & d & !e) |
-            (a & b & !d & e) |
-            (a & c & !d & e) |
-            (b & !c & d & !e) |
-            (!c & d & (a ^ b)) |
-            (!c & !e & (a ^ b)) |
-            (!a & !b & !c & !d & e) ;
+        self.q = (!a & c & !(d ^ e))
+            | (a & !b & d & !e)
+            | (a & b & !d & e)
+            | (a & c & !d & e)
+            | (b & !c & d & !e)
+            | (!c & d & (a ^ b))
+            | (!c & !e & (a ^ b))
+            | (!a & !b & !c & !d & e);
 
-        self.p =
-            (!a & c & !e & !(b ^ d)) |
-            (a & b & !d) |
-            (!b & !c & d) |
-            (b & !d & !(c ^ e)) |
-            (d & e & !(a ^ c)) |
-            (!a & !b & !c & e) ;
+        self.p = (!a & c & !e & !(b ^ d))
+            | (a & b & !d)
+            | (!b & !c & d)
+            | (b & !d & !(c ^ e))
+            | (d & e & !(a ^ c))
+            | (!a & !b & !c & e);
 
         // let tmp =
         //     a.unwrap() << 4 |
@@ -568,14 +533,14 @@ impl Csa {
     }
 
     fn stream_cypher_init(&mut self, sb: &[u8]) {
-        for i in 0 .. 8 {
+        for (i, sb_item) in sb.iter().enumerate().take(8) {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
                 // TODO: wrap many packets
-                let tmp = (sb[i] >> ((1 - (j & 1)) << 2)) & 0x0F;
+                let tmp = (*sb_item >> ((1 - (j & 1)) << 2)) & 0x0F;
                 let tmp = Nibble::new(
-                    Bit::new(tmp >> 0),
+                    Bit::new(tmp),
                     Bit::new(tmp >> 1),
                     Bit::new(tmp >> 2),
                     Bit::new(tmp >> 3),
@@ -583,9 +548,9 @@ impl Csa {
                 self.a[skip] = self.a[skip + 10] ^ self.x ^ self.d ^ tmp;
 
                 // TODO: wrap many packets
-                let tmp = (sb[i] >> ((j & 1) << 2)) & 0x0F;
+                let tmp = (*sb_item >> ((j & 1) << 2)) & 0x0F;
                 let tmp = Nibble::new(
-                    Bit::new(tmp >> 0),
+                    Bit::new(tmp),
                     Bit::new(tmp >> 1),
                     Bit::new(tmp >> 2),
                     Bit::new(tmp >> 3),
@@ -604,7 +569,8 @@ impl Csa {
     }
 
     fn stream_cypher(&mut self, cb: &mut [u8]) {
-        for i in 0 .. 8 {
+        // for i in 0 .. 8 {
+        for (i, cb_item) in cb.iter_mut().enumerate().take(8) {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
 
@@ -618,8 +584,7 @@ impl Csa {
 
                 let tmp = ((self.d.2 ^ self.d.3) << 1) | (self.d.0 ^ self.d.1);
 
-                // TODO: unwrap many packets
-                cb[i] = cb[i] << 2 | tmp.unwrap();
+                *cb_item = (*cb_item << 2) | tmp.unwrap();
             }
         }
 
@@ -632,15 +597,10 @@ impl Csa {
     // Nibble - полубайт. Содержит 4 бита
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
-        let mut block: [u8; 8] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut block: [u8; 8] = [0; 8];
 
-        for i in 0 .. 4 {
-            dest[i] = src[i];
-        }
-
-        for i in 0 .. 8 {
-            block[i] = src[4 + i];
-        }
+        dest[.. 4].copy_from_slice(&src[.. 4]);
+        block.copy_from_slice(&src[4 .. 12]);
 
         self.stream_init();
         self.stream_cypher_init(&block);
@@ -650,15 +610,13 @@ impl Csa {
             self.stream_cypher(&mut block);
 
             for j in 0 .. 8 {
-                block[j] = block[j] ^ src[4 + i * 8 + 8 + j];
+                block[j] ^= src[4 + i * 8 + 8 + j];
                 dest[4 + i * 8 + j] = block[j] ^ self.t[j]
             }
         }
 
         self.block_decypher(&block);
 
-        for i in 0 .. 8 {
-            dest[180 + i] = self.t[i];
-        }
+        dest[180 .. 188].copy_from_slice(&self.t[.. 8]);
     }
 }

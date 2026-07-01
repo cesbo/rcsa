@@ -1,29 +1,26 @@
-use {
-    std::{
-        ops::{
-            BitAnd,
-            BitOr,
-            BitXor,
-            Not,
-            Shl,
-        },
-    },
+use std::ops::{
+    BitAnd,
+    BitOr,
+    BitXor,
+    Not,
+    Shl,
 };
-
 
 #[derive(Debug, Copy, Clone)]
 pub struct Bit(u8);
 
-
 impl Bit {
-    pub const fn new(bit: u8) -> Self { Bit(bit & 0x01) }
+    pub const fn new(bit: u8) -> Self {
+        Bit(bit & 0x01)
+    }
 
     pub const B0: Bit = Bit::new(0);
 
     // TODO: many packets
-    pub fn unwrap(&self) -> u8 { self.0 }
+    pub fn unwrap(&self) -> u8 {
+        self.0
+    }
 }
-
 
 impl BitAnd for Bit {
     type Output = Self;
@@ -33,7 +30,6 @@ impl BitAnd for Bit {
     }
 }
 
-
 impl BitOr for Bit {
     type Output = Self;
 
@@ -41,7 +37,6 @@ impl BitOr for Bit {
         Bit(self.0 | rhs.0)
     }
 }
-
 
 impl BitXor for Bit {
     type Output = Self;
@@ -51,7 +46,6 @@ impl BitXor for Bit {
     }
 }
 
-
 impl Not for Bit {
     type Output = Bit;
 
@@ -59,7 +53,6 @@ impl Not for Bit {
         Bit((!self.0) & 0x01)
     }
 }
-
 
 impl Shl<usize> for Bit {
     type Output = Self;
