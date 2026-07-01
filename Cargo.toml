@@ -5,3 +5,10 @@ authors = ["Andrey Dyldin <and@cesbo.com>"]
 edition = "2024"
 
 [dependencies]
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "decrypt"
+harness = false

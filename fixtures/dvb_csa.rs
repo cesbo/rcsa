@@ -1,27 +1,16 @@
-mod key;
-mod csa;
+// Known-answer test vector for DVB-CSA.
+//
+// A single 188-byte MPEG-TS packet (`TS_SCRAMBLED`) that decrypts to
+// `TS_CLEAR` under the control word `CW`. Shared by the integration tests
+// and the benchmark via `include!` so there is a single source of truth.
 
+// The benchmark and each test binary include this file separately and use
+// different subsets of the vectors, so unused ones are expected per-consumer.
 
-mod bit_u1;
-pub (crate) use bit_u1::{
-    Bit,
-};
-
-
-mod nibble;
-pub (crate) use nibble::{
-    Nibble,
-};
-
-
-use {
-    csa::Csa,
-};
-
-
+#[allow(dead_code)]
 const CW: [u8; 8] = [0x07, 0xe0, 0x1b, 0x02, 0xc9, 0xe0, 0x45, 0xee];
 
-
+#[allow(dead_code)]
 const TS_SCRAMBLED: &[u8] = &[
     0x47, 0x00, 0x00, 0xd0,
     0xde, 0xcf, 0x0a, 0x0d, 0xb2, 0xd7, 0xc4, 0x40, 0xde, 0x5d, 0x63, 0x18, 0x5a, 0x98, 0x17, 0xaa,
@@ -38,7 +27,7 @@ const TS_SCRAMBLED: &[u8] = &[
     0xae, 0x50, 0xf1, 0x63, 0xd4, 0x5d, 0x9c, 0x6c
 ];
 
-
+#[allow(dead_code)]
 const TS_CLEAR: &[u8] = &[
     0x47, 0x00, 0x00, 0xd0,
     0xaf, 0xbe, 0xfb, 0xef, 0xbe, 0xfb, 0xef, 0xbe, 0xfb, 0xef, 0xbe, 0xfb, 0xe6, 0xb5, 0xad, 0x7c,
@@ -54,49 +43,3 @@ const TS_CLEAR: &[u8] = &[
     0xb5, 0xf3, 0xe7, 0xcf, 0x96, 0xc5, 0xb1, 0xf3, 0xe7, 0xcf, 0x9a, 0xd0, 0x00, 0x00, 0x00, 0x00,
     0xff, 0xfc, 0x44, 0x00, 0x66, 0xb1, 0x11, 0x11
 ];
-
-
-fn main() {
-    let mut csa = Csa::default();
-    csa.set_cw(&CW);
-
-    let mut buffer = Vec::<u8>::new();
-    buffer.resize(TS_SCRAMBLED.len(), 0x00);
-    csa.decrypt(TS_SCRAMBLED, &mut buffer);
-
-    println!("decryption: {}", buffer.as_slice() == TS_CLEAR);
-
-    const TS_PKTS_FOR_TEST: usize = 30 * 1000;
-
-    let now = std::time::Instant::now();
-    for _ in 0 .. TS_PKTS_FOR_TEST {
-        csa.decrypt(TS_SCRAMBLED, &mut buffer);
-    }
-    let diff = now.elapsed().as_micros() as f64;
-
-    println!(
-        "speed={:.4} Mbit/s\n",
-        (184 * TS_PKTS_FOR_TEST * 8 * 1000000) as f64 / diff / 1000000.0
-    );
-}
-
-
-/// Bits permutataion
-///
-/// ```ignore
-/// (((v >> 0) & 1) << arr[0]) | (((v >> 1) & 1) << arr[2]) | ...
-/// ```
-#[macro_export]
-macro_rules! bit_permutation {
-    ($v: ident, $pos:expr, [$next:literal]) => {
-        (($v >> $pos) & 1) << $next
-    };
-
-    ($v: ident, $pos:expr, [$next:literal, $($arr:literal),+ $(,)?]) => {
-        bit_permutation!($v, $pos, [$next]) | bit_permutation!($v, $pos + 1, [$($arr),+])
-    };
-
-    ($v: ident, [$($arr:literal),+ $(,)?]) => {
-        bit_permutation!($v, 0, [$($arr),+])
-    };
-}

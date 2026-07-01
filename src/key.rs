@@ -1,4 +1,21 @@
-use crate::bit_permutation;
+/// Bits permutation.
+///
+/// ```ignore
+/// (((v >> 0) & 1) << arr[0]) | (((v >> 1) & 1) << arr[1]) | ...
+/// ```
+macro_rules! bit_permutation {
+    ($v:ident, $pos:expr, [$next:literal]) => {
+        (($v >> $pos) & 1) << $next
+    };
+
+    ($v:ident, $pos:expr, [$next:literal, $($arr:literal),+ $(,)?]) => {
+        bit_permutation!($v, $pos, [$next]) | bit_permutation!($v, $pos + 1, [$($arr),+])
+    };
+
+    ($v:ident, [$($arr:literal),+ $(,)?]) => {
+        bit_permutation!($v, 0, [$($arr),+])
+    };
+}
 
 fn key_permutation(data: u64) -> u64 {
     bit_permutation!(
