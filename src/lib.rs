@@ -2,11 +2,16 @@
 //! descrambler used in DVB transport streams.
 
 mod bit_u1;
-mod nibble;
-mod key;
+mod bs;
 mod csa;
+mod key;
+mod nibble;
 
-pub(crate) use bit_u1::Bit;
-pub(crate) use nibble::Nibble;
-
-pub use csa::Csa;
+pub(crate) use self::{
+    bit_u1::Bit,
+    nibble::Nibble,
+};
+pub use self::{
+    bs::CsaBatch,
+    csa::Csa,
+};
