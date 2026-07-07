@@ -1,9 +1,10 @@
-//! 256-bit AVX2 bitslice word: 256 packets in parallel.
+//! 128-bit SSE2 bitslice word: 128 packets in parallel.
 //!
-//! `__m256i` cannot implement the std bit-op traits directly, so it is wrapped
-//! in `W256`. The intrinsics are only emitted where the whole call tree is
-//! inlined into a `#[target_feature(enable = "avx2")]` root (see `batch.rs`),
-//! and that root is reached only behind `is_x86_feature_detected!("avx2")`.
+//! `__m128i` cannot implement the std bit-op traits directly, so it is wrapped
+//! in `W128`. SSE2 is part of the x86-64 baseline, so unlike AVX2 this backend
+//! needs no runtime feature gate; it exists as a middle datapath between `u64`
+//! (64 lanes) and AVX2 `W256` (256 lanes) — the widest vector every x86-64 CPU
+//! is guaranteed to have, so it is the natural fallback when AVX2 is absent.
 
 use core::{
     arch::x86_64::*,
@@ -21,66 +22,61 @@ use crate::bs::word::{
     scatter64,
 };
 
-#[inline]
-pub fn available() -> bool {
-    std::is_x86_feature_detected!("avx2")
-}
-
 #[derive(Copy, Clone)]
-pub struct W256(pub __m256i);
+pub struct W128(pub __m128i);
 
-impl BitAnd for W256 {
+impl BitAnd for W128 {
     type Output = Self;
     #[inline(always)]
     fn bitand(self, r: Self) -> Self {
-        unsafe { W256(_mm256_and_si256(self.0, r.0)) }
+        unsafe { W128(_mm_and_si128(self.0, r.0)) }
     }
 }
 
-impl BitOr for W256 {
+impl BitOr for W128 {
     type Output = Self;
     #[inline(always)]
     fn bitor(self, r: Self) -> Self {
-        unsafe { W256(_mm256_or_si256(self.0, r.0)) }
+        unsafe { W128(_mm_or_si128(self.0, r.0)) }
     }
 }
 
-impl BitXor for W256 {
+impl BitXor for W128 {
     type Output = Self;
     #[inline(always)]
     fn bitxor(self, r: Self) -> Self {
-        unsafe { W256(_mm256_xor_si256(self.0, r.0)) }
+        unsafe { W128(_mm_xor_si128(self.0, r.0)) }
     }
 }
 
-impl Not for W256 {
+impl Not for W128 {
     type Output = Self;
     #[inline(always)]
     fn not(self) -> Self {
         // No NOT intrinsic: xor with all-ones.
-        unsafe { W256(_mm256_xor_si256(self.0, _mm256_set1_epi8(-1i8))) }
+        unsafe { W128(_mm_xor_si128(self.0, _mm_set1_epi8(-1i8))) }
     }
 }
 
-impl Word for W256 {
-    const LANES: usize = 256;
+impl Word for W128 {
+    const LANES: usize = 128;
 
     #[inline(always)]
     fn zero() -> Self {
-        unsafe { W256(_mm256_setzero_si256()) }
+        unsafe { W128(_mm_setzero_si128()) }
     }
 
     #[inline(always)]
     fn ones() -> Self {
-        unsafe { W256(_mm256_set1_epi8(-1i8)) }
+        unsafe { W128(_mm_set1_epi8(-1i8)) }
     }
 
     #[inline(always)]
-    fn gather_bitplanes(col: &[u8]) -> [W256; 8] {
-        // Split the (up to) 256 lanes into four 64-lane limbs and reuse the u64
+    fn gather_bitplanes(col: &[u8]) -> [W128; 8] {
+        // Split the (up to) 128 lanes into two 64-lane limbs and reuse the u64
         // SWAR transpose on each; lane p lives in limb p/64, u64-bit p%64.
         let n = col.len();
-        let mut limbs = [[0u64; 4]; 8];
+        let mut limbs = [[0u64; 2]; 8];
         let mut l = 0;
         while l * 64 < n {
             let end = core::cmp::min(l * 64 + 64, n);
@@ -90,21 +86,21 @@ impl Word for W256 {
             }
             l += 1;
         }
-        let mut planes = [W256::zero(); 8];
+        let mut planes = [W128::zero(); 8];
         for bit in 0 .. 8 {
             planes[bit] =
-                W256(unsafe { _mm256_loadu_si256(limbs[bit].as_ptr() as *const __m256i) });
+                W128(unsafe { _mm_loadu_si128(limbs[bit].as_ptr() as *const __m128i) });
         }
         planes
     }
 
     #[inline(always)]
-    fn scatter_bitplanes(planes: &[W256; 8], col: &mut [u8]) {
+    fn scatter_bitplanes(planes: &[W128; 8], col: &mut [u8]) {
         let n = col.len();
-        let mut limbs = [[0u64; 4]; 8];
+        let mut limbs = [[0u64; 2]; 8];
         for bit in 0 .. 8 {
             unsafe {
-                _mm256_storeu_si256(limbs[bit].as_mut_ptr() as *mut __m256i, planes[bit].0);
+                _mm_storeu_si128(limbs[bit].as_mut_ptr() as *mut __m128i, planes[bit].0);
             }
         }
         let mut l = 0;

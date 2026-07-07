@@ -45,8 +45,12 @@ impl CsaBatch {
     }
 
     /// Descramble a contiguous buffer of concatenated 188-byte TS packets in
-    /// place. `packets.len()` must be a multiple of 188. Selects the AVX2
-    /// backend at runtime when available, else the portable `u64` backend.
+    /// place. `packets.len()` must be a multiple of 188.
+    ///
+    /// Picks the widest backend the batch actually *fills*:
+    /// - AVX2 (256 lanes) for ≥256 packets when the CPU has it
+    /// - SSE2 (128 lanes, x86-64 baseline) for ≥128 packets
+    /// - `u64` (64 lanes) on non-x86.
     pub fn decrypt_in_place(&self, packets: &mut [u8]) {
         assert!(
             packets.len() % PKT == 0,
@@ -54,10 +58,18 @@ impl CsaBatch {
         );
         #[cfg(target_arch = "x86_64")]
         {
-            if std::is_x86_feature_detected!("avx2") {
+            let n = packets.len() / PKT;
+            if n >= <crate::bs::avx2::W256 as Word>::LANES && crate::bs::avx2::available() {
                 // SAFETY: guarded by runtime AVX2 detection.
                 unsafe {
                     self.descramble_avx2(packets);
+                }
+                return;
+            }
+            if n >= <crate::bs::sse2::W128 as Word>::LANES {
+                // SAFETY: SSE2 is guaranteed present on every x86-64 target.
+                unsafe {
+                    self.descramble_sse2(packets);
                 }
                 return;
             }
@@ -83,10 +95,25 @@ impl CsaBatch {
             packets.len() % PKT == 0,
             "buffer length must be a multiple of 188"
         );
-        assert!(std::is_x86_feature_detected!("avx2"), "AVX2 not available");
+        assert!(crate::bs::avx2::available(), "AVX2 not available");
         // SAFETY: asserted above.
         unsafe {
             self.descramble_avx2(packets);
+        }
+    }
+
+    /// Force the SSE2 128-wide backend. SSE2 is baseline on x86-64, so this is
+    /// always available; it is the natural fallback when AVX2 is absent.
+    #[doc(hidden)]
+    #[cfg(target_arch = "x86_64")]
+    pub fn decrypt_in_place_sse2(&self, packets: &mut [u8]) {
+        assert!(
+            packets.len() % PKT == 0,
+            "buffer length must be a multiple of 188"
+        );
+        // SAFETY: SSE2 is guaranteed present on every x86-64 target.
+        unsafe {
+            self.descramble_sse2(packets);
         }
     }
 
@@ -94,6 +121,12 @@ impl CsaBatch {
     #[target_feature(enable = "avx2")]
     unsafe fn descramble_avx2(&self, packets: &mut [u8]) {
         self.descramble::<crate::bs::avx2::W256>(packets);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn descramble_sse2(&self, packets: &mut [u8]) {
+        self.descramble::<crate::bs::sse2::W128>(packets);
     }
 
     // `inline(always)` throughout the W256 chain so it collapses into the
@@ -227,12 +260,24 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn batch_kat_avx2() {
-        if !std::is_x86_feature_detected!("avx2") {
+        if !crate::bs::avx2::available() {
             return;
         }
         let n = 256;
         let mut buf = TS_SCRAMBLED.repeat(n);
         CsaBatch::new(&CW).decrypt_in_place_avx2(&mut buf);
+        for p in 0 .. n {
+            assert_eq!(&buf[p * PKT .. (p + 1) * PKT], TS_CLEAR, "lane {p}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn batch_kat_sse2() {
+        // SSE2 is baseline on x86-64; no runtime detection needed.
+        let n = 128;
+        let mut buf = TS_SCRAMBLED.repeat(n);
+        CsaBatch::new(&CW).decrypt_in_place_sse2(&mut buf);
         for p in 0 .. n {
             assert_eq!(&buf[p * PKT .. (p + 1) * PKT], TS_CLEAR, "lane {p}");
         }
@@ -275,10 +320,16 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn differential_vs_scalar_avx2() {
-        if !std::is_x86_feature_detected!("avx2") {
+        if !crate::bs::avx2::available() {
             return;
         }
         differential(|b, buf| b.decrypt_in_place_avx2(buf), 20, 600);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn differential_vs_scalar_sse2() {
+        differential(|b, buf| b.decrypt_in_place_sse2(buf), 20, 400);
     }
 
     #[test]
@@ -299,6 +350,33 @@ mod tests {
                 expect[p * PKT .. (p + 1) * PKT].copy_from_slice(&out);
             }
             CsaBatch::new(&cw).decrypt_in_place_u64(&mut buf);
+            assert_eq!(buf, expect, "count {count}");
+        }
+    }
+
+    /// `decrypt_in_place` must be bit-exact at every size, exercising the
+    /// size-aware backend crossovers (u64 / SSE2 128 / AVX2 256) and partial
+    /// trailing groups.
+    #[test]
+    fn dispatch_auto_all_sizes() {
+        let mut rng = Rng(0xD15_9A7C_4321);
+        let mut cw = [0u8; 8];
+        for x in cw.iter_mut() {
+            *x = rng.byte();
+        }
+        for &count in &[
+            1usize, 63, 64, 65, 127, 128, 129, 200, 255, 256, 257, 384, 512, 700,
+        ] {
+            let mut buf = vec![0u8; count * PKT];
+            for x in buf.iter_mut() {
+                *x = rng.byte();
+            }
+            let mut expect = buf.clone();
+            for p in 0 .. count {
+                let out = scalar(&cw, &buf[p * PKT .. (p + 1) * PKT]);
+                expect[p * PKT .. (p + 1) * PKT].copy_from_slice(&out);
+            }
+            CsaBatch::new(&cw).decrypt_in_place(&mut buf);
             assert_eq!(buf, expect, "count {count}");
         }
     }
