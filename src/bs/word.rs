@@ -140,16 +140,27 @@ pub fn load_block<W: Word>(packets: &[u8], lanes: usize, blk: usize) -> Block<W>
     w
 }
 
-/// Transpose one bitslice block back into block `blk` for packets `0..lanes`.
-/// Unused/garbage lanes are never written.
+/// Byte-domain load of block `blk`: `out[j][p]` = byte `j` of packet `p`.
+/// A plain strided byte gather -- no bit transpose (used by the byte-domain
+/// block cipher, which is far cheaper than the SWAR [`transpose8`] path).
 #[inline(always)]
-pub fn store_block<W: Word>(w: &Block<W>, packets: &mut [u8], lanes: usize, blk: usize) {
-    debug_assert!(lanes <= MAX_LANES && lanes <= W::LANES);
-    let mut col = [0u8; MAX_LANES];
-    for byte in 0 .. 8 {
-        W::scatter_bitplanes(&w[byte], &mut col[0 .. lanes]);
+pub fn load_block_bytes(packets: &[u8], lanes: usize, blk: usize, out: &mut [[u8; MAX_LANES]; 8]) {
+    debug_assert!(lanes <= MAX_LANES);
+    for j in 0 .. BLK {
         for p in 0 .. lanes {
-            packets[p * PKT + HDR + blk * BLK + byte] = col[p];
+            out[j][p] = packets[p * PKT + HDR + blk * BLK + j];
+        }
+    }
+}
+
+/// Inverse of [`load_block_bytes`]: scatter 8 byte-planes back to block `blk` for
+/// packets `0..lanes`. Unused/garbage lanes are never written.
+#[inline(always)]
+pub fn store_block_bytes(planes: &[[u8; MAX_LANES]; 8], packets: &mut [u8], lanes: usize, blk: usize) {
+    debug_assert!(lanes <= MAX_LANES);
+    for j in 0 .. BLK {
+        for p in 0 .. lanes {
+            packets[p * PKT + HDR + blk * BLK + j] = planes[j][p];
         }
     }
 }
@@ -227,8 +238,8 @@ mod tests {
     }
 
     #[test]
-    fn transpose_round_trip_u64() {
-        let mut rng = Rng(0xDEAD_BEEF);
+    fn byte_transpose_round_trip() {
+        let mut rng = Rng(0x5EED_1234);
         for &count in &[1usize, 7, 63, 64] {
             let mut buf = vec![0u8; count * PKT];
             for b in buf.iter_mut() {
@@ -236,11 +247,18 @@ mod tests {
             }
             let orig = buf.clone();
             for blk in 0 .. BLOCKS {
-                let w = load_block::<u64>(&buf, count, blk);
+                let mut planes = [[0u8; MAX_LANES]; 8];
+                load_block_bytes(&buf, count, blk, &mut planes);
+                // naive cross-check of the load
+                for j in 0 .. BLK {
+                    for p in 0 .. count {
+                        assert_eq!(planes[j][p], orig[p * PKT + HDR + blk * BLK + j]);
+                    }
+                }
                 for b in buf.iter_mut() {
                     *b ^= 0xA5;
                 }
-                store_block::<u64>(&w, &mut buf, count, blk);
+                store_block_bytes(&planes, &mut buf, count, blk);
                 for p in 0 .. count {
                     let base = p * PKT + HDR + blk * BLK;
                     assert_eq!(&buf[base .. base + BLK], &orig[base .. base + BLK]);

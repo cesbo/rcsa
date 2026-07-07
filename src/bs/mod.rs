@@ -3,7 +3,6 @@
 
 mod block;
 mod nibble;
-pub mod sbox;
 mod stream;
 mod word;
 

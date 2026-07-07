@@ -7,18 +7,17 @@
 //! untouched.
 
 use crate::bs::{
-    block::{
-        KkMask,
-        block_decypher,
-    },
+    block::block_decypher,
     nibble::Nibble,
     stream::StreamState,
     word::{
         BLOCKS,
+        MAX_LANES,
         PKT,
         Word,
         load_block,
-        store_block,
+        load_block_bytes,
+        store_block_bytes,
     },
 };
 
@@ -101,28 +100,16 @@ impl CsaBatch {
     // `descramble_avx2` `#[target_feature]` root and the SIMD ops fuse to AVX2.
     #[inline(always)]
     fn descramble<W: Word>(&self, packets: &mut [u8]) {
-        let kk = kk_mask::<W>(&self.kk);
         let ccw = ccw_bits::<W>(&self.cw);
         let total = packets.len() / PKT;
         let mut done = 0;
         while done < total {
             let lanes = core::cmp::min(W::LANES, total - done);
             let group = &mut packets[done * PKT .. (done + lanes) * PKT];
-            descramble_group::<W>(&kk, &ccw, group, lanes);
+            descramble_group::<W>(&self.kk, &ccw, group, lanes);
             done += lanes;
         }
     }
-}
-
-#[inline(always)]
-fn kk_mask<W: Word>(kk: &[u8; 56]) -> KkMask<W> {
-    let mut m = [[W::zero(); 8]; 56];
-    for i in 0 .. 56 {
-        for b in 0 .. 8 {
-            m[i][b] = W::splat((kk[i] >> b) & 1 == 1);
-        }
-    }
-    m
 }
 
 /// Broadcast the 16 CW nibbles, matching `Csa::set_cw`: `ccw[2i]` = high nibble
@@ -152,46 +139,54 @@ fn ccw_bits<W: Word>(cw: &[u8; 8]) -> [Nibble<W>; 16] {
 /// Descramble up to `W::LANES` packets (`lanes` valid) in place.
 #[inline(always)]
 fn descramble_group<W: Word>(
-    kk: &KkMask<W>,
+    kk: &[u8; 56],
     ccw: &[Nibble<W>; 16],
     group: &mut [u8],
     lanes: usize,
 ) {
-    // Transpose the whole payload in up front, so writing plaintext back can
-    // never clobber a ciphertext block that is still needed.
-    let mut ct = [[[W::zero(); 8]; 8]; BLOCKS];
-    for (k, c) in ct.iter_mut().enumerate() {
-        *c = load_block::<W>(group, lanes, k);
+    // 1. Preload all 23 ciphertext blocks in BYTE domain (cheap strided gather),
+    //    so writing plaintext back can never clobber ciphertext still needed.
+    let mut ct = [[[0u8; MAX_LANES]; 8]; BLOCKS];
+    for k in 0 .. BLOCKS {
+        load_block_bytes(group, lanes, k, &mut ct[k]);
     }
 
-    // Block-cipher state; zero-init is correct (T is fully rebuilt each block).
-    let mut t = [[W::zero(); 8]; 64];
+    // 2. Byte-domain block-cipher state; zero-init once (T is fully rebuilt each
+    //    block -- same invariant as the bitsliced path).
+    let mut t = [[0u8; MAX_LANES]; 64];
 
+    // 3. Stream cipher stays bitsliced; its seed needs block 0 in bitslice form.
+    let seed = load_block::<W>(group, lanes, 0);
     let mut st = StreamState::<W>::new();
     st.stream_init(ccw);
-    st.stream_cypher_init(&ct[0]);
+    st.stream_cypher_init(&seed);
 
-    // Running block, kept in bitslice; starts as ciphertext block 0.
+    // 4. Running block-cipher input (byte domain); starts as ciphertext block 0.
     let mut block = ct[0];
+    let mut ks_bytes = [[0u8; MAX_LANES]; 8];
+    let mut pt = [[0u8; MAX_LANES]; 8];
 
     for i in 0 .. 22 {
-        block_decypher::<W>(&mut t, &block, kk);
-        let ks = st.stream_cypher();
-        let mut pt = [[W::zero(); 8]; 8];
-        for byte in 0 .. 8 {
-            for bit in 0 .. 8 {
-                let nb = ks[byte][bit] ^ ct[i + 1][byte][bit];
-                block[byte][bit] = nb;
-                pt[byte][bit] = nb ^ t[byte][bit];
+        block_decypher::<W>(&mut t, &block, kk); // t[0..8] = byte-domain output
+        let ks = st.stream_cypher(); // bitsliced Block<W>
+        for j in 0 .. 8 {
+            W::scatter_bitplanes(&ks[j], &mut ks_bytes[j][0 .. lanes]); // bit -> byte
+        }
+        for j in 0 .. 8 {
+            for g in 0 .. lanes {
+                let nb = ks_bytes[j][g] ^ ct[i + 1][j][g];
+                block[j][g] = nb; // next cipher input
+                pt[j][g] = nb ^ t[j][g]; // plaintext
             }
         }
-        store_block::<W>(&pt, group, lanes, i);
+        store_block_bytes(&pt, group, lanes, i);
     }
 
+    // Last block: plaintext is t[0..8] directly (no keystream/ciphertext combine).
     block_decypher::<W>(&mut t, &block, kk);
-    let mut last = [[W::zero(); 8]; 8];
+    let mut last = [[0u8; MAX_LANES]; 8];
     last.copy_from_slice(&t[0 .. 8]);
-    store_block::<W>(&last, group, lanes, 22);
+    store_block_bytes(&last, group, lanes, 22);
 }
 
 #[cfg(test)]
