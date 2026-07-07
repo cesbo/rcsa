@@ -138,21 +138,16 @@ fn ccw_bits<W: Word>(cw: &[u8; 8]) -> [Nibble<W>; 16] {
 
 /// Descramble up to `W::LANES` packets (`lanes` valid) in place.
 #[inline(always)]
-fn descramble_group<W: Word>(
-    kk: &[u8; 56],
-    ccw: &[Nibble<W>; 16],
-    group: &mut [u8],
-    lanes: usize,
-) {
-    // 1. Preload all 23 ciphertext blocks in BYTE domain (cheap strided gather),
-    //    so writing plaintext back can never clobber ciphertext still needed.
+fn descramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8], lanes: usize) {
+    // 1. Preload all 23 ciphertext blocks in BYTE domain (cheap strided gather), so writing
+    //    plaintext back can never clobber ciphertext still needed.
     let mut ct = [[[0u8; MAX_LANES]; 8]; BLOCKS];
     for k in 0 .. BLOCKS {
         load_block_bytes(group, lanes, k, &mut ct[k]);
     }
 
-    // 2. Byte-domain block-cipher state; zero-init once (T is fully rebuilt each
-    //    block -- same invariant as the bitsliced path).
+    // 2. Byte-domain block-cipher state; zero-init once (T is fully rebuilt each block -- same
+    //    invariant as the bitsliced path).
     let mut t = [[0u8; MAX_LANES]; 64];
 
     // 3. Stream cipher stays bitsliced; its seed needs block 0 in bitslice form.

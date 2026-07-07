@@ -156,7 +156,12 @@ pub fn load_block_bytes(packets: &[u8], lanes: usize, blk: usize, out: &mut [[u8
 /// Inverse of [`load_block_bytes`]: scatter 8 byte-planes back to block `blk` for
 /// packets `0..lanes`. Unused/garbage lanes are never written.
 #[inline(always)]
-pub fn store_block_bytes(planes: &[[u8; MAX_LANES]; 8], packets: &mut [u8], lanes: usize, blk: usize) {
+pub fn store_block_bytes(
+    planes: &[[u8; MAX_LANES]; 8],
+    packets: &mut [u8],
+    lanes: usize,
+    blk: usize,
+) {
     debug_assert!(lanes <= MAX_LANES);
     for j in 0 .. BLK {
         for p in 0 .. lanes {
