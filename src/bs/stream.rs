@@ -56,136 +56,262 @@ fn rotate_nibble<W: Word>(n: Nibble<W>, p: W) -> Nibble<W> {
     )
 }
 
-// --- The seven 5-input stream S-boxes (verbatim from scalar a_group_xor) ---
+// --- The seven 5-input, 2-output stream S-boxes ---
+//
+// These are multi-level XOR/AND circuits synthesised from the reference
+// 2-bit S-box tables with Berkeley ABC.
 
 #[inline(always)]
 fn sbox1<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s1a = (!a & b & !d & !e)
-        | (!a & c & !d & e)
-        | (a & !c & e & !(b ^ d))
-        | (!b & d & !e)
-        | (b & c & (a ^ e))
-        | (b & c & !d)
-        | (!b & d & !(a ^ c));
-    let s1b = (!a & !b & !d & !e)
-        | (a & !b & !c & d & !e)
-        | (a & b & !c & e)
-        | (a & !c & !d & e)
-        | (b & c & d & (a ^ e))
-        | (!d & (b ^ c))
-        | (!a & !e & (b ^ c));
-    (s1a, s1b)
+    let t0 = !(d ^ c);
+    let t1 = b ^ t0;
+    let t2 = !(e | t1);
+    let t3 = d & !b;
+    let t4 = e & !c;
+    let t5 = t4 & !t3;
+    let t6 = !(t5 | t2);
+    let t7 = a & !t6;
+    let t8 = c & !e;
+    let t9 = !(e | d);
+    let t10 = !(b | t9);
+    let t11 = t10 & !t8;
+    let t12 = t11 & t7;
+    let t13 = !(t3 | t12);
+    let t14 = !(a | t8);
+    let t15 = !(t4 | t14);
+    let t16 = d & !t15;
+    let t17 = !(t16 | t13);
+    let t18 = e & d;
+    let t19 = c ^ t18;
+    let t20 = a & !t19;
+    let t21 = c & t18;
+    let t22 = !(a | t9);
+    let t23 = t22 & !t21;
+    let t24 = b & !t23;
+    let t25 = t24 & !t20;
+    let t26 = !(b | t0);
+    let t27 = c & !d;
+    let t28 = !(t27 | t26);
+    let t29 = t14 & !t28;
+    let t30 = !(t29 | t25);
+    let t31 = !t30 | t17;
+    let t32 = b & t19;
+    let t33 = !(t32 | t11);
+    let t34 = t33 & !a;
+    let t35 = t27 & t11;
+    let t36 = !(t35 | t7);
+    let t37 = !t36 | t34;
+    (t31, t37)
 }
 
 #[inline(always)]
 fn sbox2<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s2a = (!a & !c & !d)
-        | (!a & c & d & !e)
-        | (a & b & c & e)
-        | (a & b & d & !e)
-        | (!c & e & (a ^ b))
-        | (!b & !d & (a ^ e));
-    let s2b = (!a & b & !c & (d ^ e))
-        | (!a & b & c & d & e)
-        | (a & !b & d & e)
-        | (a & !c & d & e)
-        | (!b & !c & d & e)
-        | (!b & c & !d)
-        | (!b & !d & !e)
-        | (c & !e & !(a ^ b));
-    (s2a, s2b)
+    let t0 = d & !e;
+    let t1 = e & c;
+    let t2 = !(t1 | t0);
+    let t3 = !(b | t2);
+    let t4 = b & t2;
+    let t5 = a & !t4;
+    let t6 = t5 & !t3;
+    let t7 = e & !b;
+    let t8 = c & !t7;
+    let t9 = d & !t8;
+    let t10 = t9 & !t4;
+    let t11 = t8 & !t0;
+    let t12 = !(a | t11);
+    let t13 = t12 & !t10;
+    let t14 = t13 | t6;
+    let t15 = e & !c;
+    let t16 = !(d | t15);
+    let t17 = e & d;
+    let t18 = c & !a;
+    let t19 = t18 ^ t17;
+    let t20 = !(t19 | t16);
+    let t21 = a & !t1;
+    let t22 = !(t21 | t20);
+    let t23 = a & !c;
+    let t24 = t23 & !t17;
+    let t25 = b & !t24;
+    let t26 = t25 & !t22;
+    let t27 = !(b | t20);
+    let t28 = t27 | t26;
+    (t14, t28)
 }
 
 #[inline(always)]
 fn sbox3<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s3a = (!e & (a ^ b ^ d)) | (e & (a ^ b ^ c));
-    let s3b = (!a & !b & !d & !e)
-        | (!a & !c & d & e)
-        | (!a & c & !e)
-        | (a & b & c & !d & e)
-        | (a & !c & !d & (b ^ e))
-        | (!b & c & !e)
-        | (b & !c & d & e)
-        | (c & d & !e)
-        | (!b & c & !(a ^ d));
-    (s3a, s3b)
+    let t0 = d & !e;
+    let t1 = e & c;
+    let t2 = !(t1 | t0);
+    let t3 = !(b ^ a);
+    let t4 = t3 ^ t2;
+    let t5 = d ^ b;
+    let t6 = t5 & !t0;
+    let t7 = e ^ c;
+    let t8 = !(t7 | t6);
+    let t9 = t7 & t6;
+    let t10 = a & !t9;
+    let t11 = t10 & !t8;
+    let t12 = !(d | c);
+    let t13 = e & t12;
+    let t14 = !(d | b);
+    let t15 = !(t7 | t14);
+    let t16 = !(a | t15);
+    let t17 = t16 & !t13;
+    let t18 = t17 | t11;
+    (t4, t18)
 }
 
 #[inline(always)]
 fn sbox4<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s4a = (!a & !b & c & d & !e)
-        | (!a & !c & !(d ^ e))
-        | (a & !b & c & e)
-        | (a & b & !c & !d & e)
-        | (b & c & !d & !e)
-        | (d & e & !(b ^ c))
-        | (!b & !c & (a ^ e));
-    let s4b = (!a & !b & !c & !e)
-        | (!a & b & c & !d & !e)
-        | (!a & c & d & e)
-        | (a & !b & c & !d)
-        | (a & b & (d ^ e))
-        | (!b & !c & d & !e)
-        | (!b & c & e)
-        | (b & !c & !d & e)
-        | (!a & !b & !c & d);
-    (s4a, s4b)
+    let t0 = d & !c;
+    let t1 = e & !t0;
+    let t2 = a & t1;
+    let t3 = d & !a;
+    let t4 = t3 & !t1;
+    let t5 = !(t4 | t2);
+    let t6 = c ^ t5;
+    let t7 = t6 & !b;
+    let t8 = a & !c;
+    let t9 = !(d | t8);
+    let t10 = !(e | t9);
+    let t11 = b & !t10;
+    let t12 = e & t9;
+    let t13 = !(t0 | t12);
+    let t14 = t13 & t11;
+    let t15 = e & !a;
+    let t16 = t15 & t0;
+    let t17 = !(t16 | t14);
+    let t18 = !t17 | t7;
+    let t19 = d ^ b;
+    let t20 = c & t19;
+    let t21 = b & !t20;
+    let t22 = c & !b;
+    let t23 = !(a | t22);
+    let t24 = t23 & !t21;
+    let t25 = !(d | c);
+    let t26 = a & !t25;
+    let t27 = t26 & !t20;
+    let t28 = !(t27 | t24);
+    let t29 = !(e | t28);
+    let t30 = t19 & !a;
+    let t31 = d & b;
+    let t32 = a & t31;
+    let t33 = c & !t32;
+    let t34 = t33 & !t30;
+    let t35 = !(t25 | t3);
+    let t36 = t19 & !t35;
+    let t37 = !(t36 | t34);
+    let t38 = e & !t37;
+    let t39 = t38 | t29;
+    (t18, t39)
 }
 
 #[inline(always)]
 fn sbox5<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s5a = (!a & b & d & e)
-        | (!a & !c & d & e)
-        | (!a & c & !d & !e)
-        | (a & !b & !d & e)
-        | (a & c & (b ^ d))
-        | (b & !c & (a ^ e))
-        | (b & !c & d & !e)
-        | (!a & !b & c & !e);
-    let s5b = (!a & c & d & !e)
-        | (a & !b & !c & !e)
-        | (a & b & c & !d & !e)
-        | (a & e & !(b ^ d))
-        | (!b & !c & !d & !e)
-        | (b & !c & d)
-        | (!a & !b & c);
-    (s5a, s5b)
+    let t0 = d ^ c;
+    let t1 = e & !a;
+    let t2 = !(t1 | t0);
+    let t3 = e & t0;
+    let t4 = b & !t3;
+    let t5 = t4 & !t2;
+    let t6 = b & !c;
+    let t7 = e ^ t6;
+    let t8 = !(d | t7);
+    let t9 = c & !b;
+    let t10 = d & !t9;
+    let t11 = a & !t10;
+    let t12 = t11 & !t8;
+    let t13 = e & d;
+    let t14 = !(t13 | t9);
+    let t15 = e & c;
+    let t16 = !(t15 | t14);
+    let t17 = t16 & !a;
+    let t18 = !(t17 | t12);
+    let t19 = !t18 | t5;
+    let t20 = !(e | t6);
+    let t21 = !t0 & t20;
+    let t22 = d & b;
+    let t23 = t22 & !t15;
+    let t24 = !(t9 | t23);
+    let t25 = t24 & !t21;
+    let t26 = !(a | t25);
+    let t27 = t13 & !b;
+    let t28 = c & !e;
+    let t29 = b & !d;
+    let t30 = !(t29 ^ t28);
+    let t31 = a & t30;
+    let t32 = t31 & !t27;
+    let t33 = t32 | t26;
+    (t19, t33)
 }
 
 #[inline(always)]
 fn sbox6<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let s6a =
-        (!b & c & !d & !e) | (b & (d ^ e)) | (!c & !d & e) | (c & d & (a ^ b)) | (!a & !b & !c & e);
-    let s6b = (!a & b & c & !d)
-        | (!a & b & c & e)
-        | (!a & c & !d & e)
-        | (a & b & c & d & !e)
-        | (a & !c & d & e)
-        | (!b & !e & (a ^ d))
-        | (b & c & !d & e)
-        | (!c & !e & (a ^ d))
-        | (!b & !c & (a ^ d));
-    (s6a, s6b)
+    let t0 = c & !b;
+    let t1 = e & t0;
+    let t2 = d & a;
+    let t3 = !(t2 | t1);
+    let t4 = d & b;
+    let t5 = t4 & !c;
+    let t6 = e & !t5;
+    let t7 = t6 & t3;
+    let t8 = !(e | d);
+    let t9 = !(t8 | t2);
+    let t10 = t0 & !t9;
+    let t11 = t4 & !e;
+    let t12 = !(t11 | t10);
+    let t13 = !t12 | t7;
+    let t14 = !(e ^ c);
+    let t15 = b & !t14;
+    let t16 = !(d | a);
+    let t17 = t3 & !t16;
+    let t18 = t17 & !t15;
+    let t19 = c & t16;
+    let t20 = t19 & !t10;
+    let t21 = t2 & !t0;
+    let t22 = t21 & !t14;
+    let t23 = !(t22 | t20);
+    let t24 = !t23 | t18;
+    (t13, t24)
 }
 
-/// Returns `(q, p)` (matching scalar `self.q`, `self.p`).
 #[inline(always)]
 fn sbox7<T: Bit>(a: T, b: T, c: T, d: T, e: T) -> (T, T) {
-    let q = (!a & c & !(d ^ e))
-        | (a & !b & d & !e)
-        | (a & b & !d & e)
-        | (a & c & !d & e)
-        | (b & !c & d & !e)
-        | (!c & d & (a ^ b))
-        | (!c & !e & (a ^ b))
-        | (!a & !b & !c & !d & e);
-    let p = (!a & c & !e & !(b ^ d))
-        | (a & b & !d)
-        | (!b & !c & d)
-        | (b & !d & !(c ^ e))
-        | (d & e & !(a ^ c))
-        | (!a & !b & !c & e);
-    (q, p)
+    let t0 = !(d ^ a);
+    let t1 = b & t0;
+    let t2 = d & t1;
+    let t3 = c & !t2;
+    let t4 = e ^ t0;
+    let t5 = t4 & t3;
+    let t6 = !(b | t0);
+    let t7 = e & !c;
+    let t8 = t7 & !t1;
+    let t9 = t8 & !t6;
+    let t10 = a & !d;
+    let t11 = b & !t10;
+    let t12 = a & !b;
+    let t13 = !(t12 | t11);
+    let t14 = !(e | c);
+    let t15 = t14 & !t13;
+    let t16 = !(t15 | t9);
+    let t17 = !t16 | t5;
+    let t18 = e & a;
+    let t19 = !(t18 | t14);
+    let t20 = d & !t19;
+    let t21 = !(e | t0);
+    let t22 = e ^ c;
+    let t23 = t22 & !a;
+    let t24 = t23 & !t21;
+    let t25 = !(t24 | t20);
+    let t26 = !(b | t25);
+    let t27 = t22 & t0;
+    let t28 = d & !t18;
+    let t29 = t28 & !t22;
+    let t30 = b & !t29;
+    let t31 = t30 & !t27;
+    let t32 = t31 | t26;
+    (t17, t32)
 }
 
 /// Stream-cipher registers, mirroring the stream fields of the scalar `Csa`.
