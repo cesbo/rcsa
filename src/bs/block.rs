@@ -66,6 +66,62 @@ pub fn block_decypher<W: Word>(
     }
 }
 
+/// Invert the CSA block cipher for one 8-byte block in the byte domain
+/// (`W::LANES` lanes, one byte per lane; padding lanes are harmless). On entry `p`
+/// holds the byte-planes of the block-cipher output; on exit `out_ib` holds the
+/// byte-planes of the input that produce `p`. The cipher's shift register is run
+/// forward (`t[0..8] = p`, 56 rounds of S-box + feedback), then the input block is
+/// read from `t[56..64]` with the low six bytes corrected for the mixed-in feedback.
+#[inline(always)]
+pub fn block_encypher<W: Word>(
+    p: &[[u8; MAX_LANES]; 8],
+    kk: &[u8; 56],
+    out_ib: &mut [[u8; MAX_LANES]; 8],
+) {
+    let n = W::LANES;
+    let mut t = [[0u8; MAX_LANES]; 64];
+    for j in 0 .. 8 {
+        t[j] = p[j]; // t[0..8] = p
+    }
+    let mut so = [[0u8; MAX_LANES]; 56];
+    let mut s = [[0u8; MAX_LANES]; 56];
+    for i in 0 .. 56 {
+        let kk_i = kk[i];
+        // sbox_in = t[i+7] ^ kk[i]; s = SBOX[in]   (one scalar lookup)
+        for g in 0 .. n {
+            s[i][g] = crate::csa::BLOCK_SBOX[(t[i + 7][g] ^ kk_i) as usize];
+        }
+        // so[i] = t[i] ^ so[i-2] ^ so[i-3] ^ so[i-4] ^ PERM(s[i-6]); t[i+8] = s[i] ^ so[i]
+        for g in 0 .. n {
+            let mut o = t[i][g];
+            if i >= 2 {
+                o ^= so[i - 2][g];
+            }
+            if i >= 3 {
+                o ^= so[i - 3][g];
+            }
+            if i >= 4 {
+                o ^= so[i - 4][g];
+            }
+            if i >= 6 {
+                o ^= perm_byte(s[i - 6][g]);
+            }
+            so[i][g] = o;
+            t[i + 8][g] = s[i][g] ^ o;
+        }
+    }
+    for g in 0 .. n {
+        out_ib[0][g] = t[56][g] ^ so[54][g] ^ so[53][g] ^ so[52][g] ^ perm_byte(s[50][g]);
+        out_ib[1][g] = t[57][g] ^ so[55][g] ^ so[54][g] ^ so[53][g] ^ perm_byte(s[51][g]);
+        out_ib[2][g] = t[58][g] ^ so[55][g] ^ so[54][g] ^ perm_byte(s[52][g]);
+        out_ib[3][g] = t[59][g] ^ so[55][g] ^ perm_byte(s[53][g]);
+        out_ib[4][g] = t[60][g] ^ perm_byte(s[54][g]);
+        out_ib[5][g] = t[61][g] ^ perm_byte(s[55][g]);
+        out_ib[6][g] = t[62][g];
+        out_ib[7][g] = t[63][g];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +183,41 @@ mod tests {
                 let exp = scalar_block(&inputs[g], &kk);
                 for j in 0 .. 8 {
                     assert_eq!(t[j][g], exp[j], "lane {g} byte {j}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn byte_block_encypher_inverts_scalar() {
+        let mut s = 0xFEDC_BA98_7654_3210u64;
+        let mut nextb = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (s >> 33) as u8
+        };
+        for _ in 0 .. 500 {
+            let mut kk = [0u8; 56];
+            for k in kk.iter_mut() {
+                *k = nextb();
+            }
+            let mut inputs = [[0u8; 8]; 64];
+            let mut p = [[0u8; MAX_LANES]; 8];
+            for g in 0 .. 64 {
+                let mut ib = [0u8; 8];
+                for b in ib.iter_mut() {
+                    *b = nextb();
+                }
+                inputs[g] = ib;
+                let out = scalar_block(&ib, &kk);
+                for j in 0 .. 8 {
+                    p[j][g] = out[j];
+                }
+            }
+            let mut rec = [[0u8; MAX_LANES]; 8];
+            block_encypher::<u64>(&p, &kk, &mut rec);
+            for g in 0 .. 64 {
+                for j in 0 .. 8 {
+                    assert_eq!(rec[j][g], inputs[g][j], "lane {g} byte {j}");
                 }
             }
         }

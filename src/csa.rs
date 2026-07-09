@@ -202,6 +202,45 @@ impl Csa {
         }
     }
 
+    fn block_encypher(&mut self, p: &[u8; 8]) -> [u8; 8] {
+        self.t[0 .. 8].copy_from_slice(p);
+
+        let mut so = [0u8; 56];
+        let mut s = [0u8; 56];
+
+        for n in 0 .. 56 {
+            s[n] = BLOCK_SBOX[(self.t[n + 7] ^ self.kk[n]) as usize];
+
+            let mut o = self.t[n];
+            if n >= 2 {
+                o ^= so[n - 2];
+            }
+            if n >= 3 {
+                o ^= so[n - 3];
+            }
+            if n >= 4 {
+                o ^= so[n - 4];
+            }
+            if n >= 6 {
+                o ^= BLOCK_PERM[s[n - 6] as usize];
+            }
+            so[n] = o;
+            self.t[n + 8] = s[n] ^ o;
+        }
+
+        let pm = |x: u8| BLOCK_PERM[x as usize];
+        [
+            self.t[56] ^ so[54] ^ so[53] ^ so[52] ^ pm(s[50]),
+            self.t[57] ^ so[55] ^ so[54] ^ so[53] ^ pm(s[51]),
+            self.t[58] ^ so[55] ^ so[54] ^ pm(s[52]),
+            self.t[59] ^ so[55] ^ pm(s[53]),
+            self.t[60] ^ pm(s[54]),
+            self.t[61] ^ pm(s[55]),
+            self.t[62],
+            self.t[63],
+        ]
+    }
+
     fn stream_init(&mut self) {
         self.a[32 .. 40].copy_from_slice(&self.ccw[.. 8]);
         self.b[32 .. 40].copy_from_slice(&self.ccw[8 ..]);
@@ -569,7 +608,6 @@ impl Csa {
     }
 
     fn stream_cypher(&mut self, cb: &mut [u8]) {
-        // for i in 0 .. 8 {
         for (i, cb_item) in cb.iter_mut().enumerate().take(8) {
             for j in 0 .. 4 {
                 let skip = 31 - i * 4 - j;
@@ -591,10 +629,6 @@ impl Csa {
         self.a.copy_within(0 .. 10, 32);
         self.b.copy_within(0 .. 10, 32);
     }
-
-    // Bit - структура содержи 1 бит пакета, bi_u8 при параллельной обработке
-    // может содержать по одному биту из 8 пакетов
-    // Nibble - полубайт. Содержит 4 бита
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
         let mut block: [u8; 8] = [0; 8];
@@ -618,5 +652,40 @@ impl Csa {
         self.block_decypher(&block);
 
         dest[180 .. 188].copy_from_slice(&self.t[.. 8]);
+    }
+
+    pub fn encrypt(&mut self, src: &[u8], dest: &mut [u8]) {
+        dest[.. 4].copy_from_slice(&src[.. 4]);
+
+        // Backward block-cipher chain: IB[22] = BC_inv(P[22]);
+        // IB[i] = BC_inv(P[i] ^ IB[i + 1]).
+        let mut ib = [[0u8; 8]; 23];
+        let mut last = [0u8; 8];
+        last.copy_from_slice(&src[4 + 22 * 8 .. 4 + 22 * 8 + 8]);
+        ib[22] = self.block_encypher(&last);
+
+        for i in (0 .. 22).rev() {
+            let mut x = [0u8; 8];
+            for j in 0 .. 8 {
+                x[j] = src[4 + i * 8 + j] ^ ib[i + 1][j];
+            }
+            ib[i] = self.block_encypher(&x);
+        }
+
+        // SB[0] = IB[0]: block 0 is the stream seed, not keystream-XORed.
+        dest[4 .. 12].copy_from_slice(&ib[0]);
+
+        let seed = ib[0];
+        self.stream_init();
+        self.stream_cypher_init(&seed);
+
+        // SB[k] = IB[k] ^ KS[k - 1] for k = 1 .. 22.
+        for k in 1 .. 23 {
+            let mut ks = [0u8; 8];
+            self.stream_cypher(&mut ks);
+            for j in 0 .. 8 {
+                dest[4 + k * 8 + j] = ib[k][j] ^ ks[j];
+            }
+        }
     }
 }
