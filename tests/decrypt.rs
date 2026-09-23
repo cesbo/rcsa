@@ -1,4 +1,4 @@
-use csa::Csa;
+use rcsa::Csa;
 
 include!("../fixtures/dvb_csa.rs");
 

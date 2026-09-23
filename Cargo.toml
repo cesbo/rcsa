@@ -1,5 +1,5 @@
 [package]
-name = "csa"
+name = "rcsa"
 version = "0.1.0"
 authors = ["Andrey Dyldin <and@cesbo.com>"]
 edition = "2024"

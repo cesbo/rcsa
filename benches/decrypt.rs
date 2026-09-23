@@ -6,7 +6,7 @@ use criterion::{
     criterion_group,
     criterion_main,
 };
-use csa::{
+use rcsa::{
     Csa,
     CsaBatch,
 };
