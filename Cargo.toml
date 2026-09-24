@@ -1,7 +1,14 @@
 [package]
 name = "rcsa"
 version = "0.1.0"
-authors = ["Andrey Dyldin <and@cesbo.com>"]
+description = "DVB Common Scrambling Algorithm (CSA) descrambler and scrambler for MPEG-TS"
+authors = ["Cesbo Developers Team <info@cesbo.com>"]
+license = "MIT"
+readme = "README.md"
+documentation = "https://docs.rs/rcsa"
+repository = "https://github.com/cesbo/libcsa"
+keywords = ["dvb", "csa", "descrambler", "mpeg-ts", "conditional-access"]
+categories = ["cryptography", "multimedia::video"]
 edition = "2024"
 
 [dependencies]
