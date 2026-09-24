@@ -331,7 +331,7 @@ fn descramble_group<W: Word>(
         block_decypher::<W>(&mut t, &block, kk); // t[0..8] = byte-domain output
         let ks = st.stream_cypher(); // bitsliced Block<W>
         for j in 0 .. 8 {
-            W::scatter_bitplanes(&ks[j], &mut ks_bytes[j][0 .. lanes]); // bit -> byte
+            W::scatter_bitplanes(&ks[j], &mut ks_bytes[j][.. W::LANES]); // bit -> byte
         }
         for j in 0 .. 8 {
             for g in 0 .. lanes {
@@ -425,7 +425,7 @@ fn scramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8
     for k in 1 .. BLOCKS {
         let ks = st.stream_cypher(); // bitsliced Block<W>
         for j in 0 .. 8 {
-            W::scatter_bitplanes(&ks[j], &mut ks_bytes[j][0 .. lanes]); // bit -> byte
+            W::scatter_bitplanes(&ks[j], &mut ks_bytes[j][.. W::LANES]); // bit -> byte
         }
         for j in 0 .. 8 {
             for g in 0 .. lanes {

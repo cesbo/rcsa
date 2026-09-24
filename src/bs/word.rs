@@ -141,14 +141,42 @@ pub fn load_block<W: Word>(packets: &[u8], lanes: usize, blk: usize) -> Block<W>
 }
 
 /// Byte-domain load of block `blk`: `out[j][p]` = byte `j` of packet `p`.
-/// A plain strided byte gather -- no bit transpose (used by the byte-domain
-/// block cipher, which is far cheaper than the SWAR [`transpose8`] path).
+/// Groups of 8 packets move as whole `u64` rows through an 8x8 byte transpose.
 #[inline(always)]
 pub fn load_block_bytes(packets: &[u8], lanes: usize, blk: usize, out: &mut [[u8; MAX_LANES]; 8]) {
     debug_assert!(lanes <= MAX_LANES);
+    let full = lanes & !7;
+    for p in (0 .. full).step_by(8) {
+        let mut r = [0u64; 8];
+        for (k, r) in r.iter_mut().enumerate() {
+            let o = (p + k) * PKT + HDR + blk * BLK;
+            *r = u64::from_le_bytes(packets[o .. o + 8].try_into().unwrap());
+        }
+        transpose8x8_bytes(&mut r);
+        for j in 0 .. BLK {
+            out[j][p .. p + 8].copy_from_slice(&r[j].to_le_bytes());
+        }
+    }
     for j in 0 .. BLK {
-        for p in 0 .. lanes {
+        for p in full .. lanes {
             out[j][p] = packets[p * PKT + HDR + blk * BLK + j];
+        }
+    }
+}
+
+/// 8x8 byte transpose: byte `j` of `r[k]` <-> byte `k` of `r[j]`.
+#[inline(always)]
+fn transpose8x8_bytes(r: &mut [u64; 8]) {
+    for (d, m) in [
+        (4, 0x0000_0000_FFFF_FFFFu64),
+        (2, 0x0000_FFFF_0000_FFFF),
+        (1, 0x00FF_00FF_00FF_00FF),
+    ] {
+        let sh = 8 * d as u32;
+        for k in (0 .. 8).filter(|k| k & d == 0) {
+            let (a, b) = (r[k], r[k + d]);
+            r[k] = (a & m) | ((b & m) << sh);
+            r[k + d] = ((a >> sh) & m) | (b & !m);
         }
     }
 }
@@ -163,8 +191,20 @@ pub fn store_block_bytes(
     blk: usize,
 ) {
     debug_assert!(lanes <= MAX_LANES);
+    let full = lanes & !7;
+    for p in (0 .. full).step_by(8) {
+        let mut r = [0u64; 8];
+        for (j, r) in r.iter_mut().enumerate() {
+            *r = u64::from_le_bytes(planes[j][p .. p + 8].try_into().unwrap());
+        }
+        transpose8x8_bytes(&mut r);
+        for (k, r) in r.iter().enumerate() {
+            let o = (p + k) * PKT + HDR + blk * BLK;
+            packets[o .. o + 8].copy_from_slice(&r.to_le_bytes());
+        }
+    }
     for j in 0 .. BLK {
-        for p in 0 .. lanes {
+        for p in full .. lanes {
             packets[p * PKT + HDR + blk * BLK + j] = planes[j][p];
         }
     }

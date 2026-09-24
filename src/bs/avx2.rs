@@ -18,7 +18,6 @@ use core::{
 use crate::bs::word::{
     Word,
     gather64,
-    scatter64,
 };
 
 #[inline]
@@ -100,22 +99,69 @@ impl Word for W256 {
 
     #[inline(always)]
     fn scatter_bitplanes(planes: &[W256; 8], col: &mut [u8]) {
-        let n = col.len();
-        let mut limbs = [[0u64; 4]; 8];
-        for bit in 0 .. 8 {
-            unsafe {
-                _mm256_storeu_si256(limbs[bit].as_mut_ptr() as *mut __m256i, planes[bit].0);
+        if col.len() < Self::LANES {
+            let mut full = [0u8; 256];
+            Self::scatter_bitplanes(planes, &mut full);
+            let n = col.len();
+            col.copy_from_slice(&full[.. n]);
+            return;
+        }
+        // Byte-interleave the planes so each u64 holds byte j of planes 0..8, then run the
+        // `transpose8` stages on four u64 at once. Unpacks stay within 128-bit halves: half h
+        // yields lanes 128h.. of the output.
+        unsafe {
+            let p = planes.map(|w| w.0);
+            let a = [
+                _mm256_unpacklo_epi8(p[0], p[1]),
+                _mm256_unpackhi_epi8(p[0], p[1]),
+                _mm256_unpacklo_epi8(p[2], p[3]),
+                _mm256_unpackhi_epi8(p[2], p[3]),
+                _mm256_unpacklo_epi8(p[4], p[5]),
+                _mm256_unpackhi_epi8(p[4], p[5]),
+                _mm256_unpacklo_epi8(p[6], p[7]),
+                _mm256_unpackhi_epi8(p[6], p[7]),
+            ];
+            let mut b = [_mm256_setzero_si256(); 8];
+            for k in 0 .. 2 {
+                b[4 * k] = _mm256_unpacklo_epi16(a[k], a[2 + k]);
+                b[4 * k + 1] = _mm256_unpackhi_epi16(a[k], a[2 + k]);
+                b[4 * k + 2] = _mm256_unpacklo_epi16(a[4 + k], a[6 + k]);
+                b[4 * k + 3] = _mm256_unpackhi_epi16(a[4 + k], a[6 + k]);
+            }
+            let dst = col.as_mut_ptr() as *mut __m128i;
+            for k in 0 .. 4 {
+                let i = k / 2 * 4 + k % 2; // pairs b[i], b[i + 2]
+                let lo = _mm256_unpacklo_epi32(b[i], b[i + 2]);
+                let hi = _mm256_unpackhi_epi32(b[i], b[i + 2]);
+                for (q, x) in [(2 * k, lo), (2 * k + 1, hi)] {
+                    let x = transpose8x4(x);
+                    _mm_storeu_si128(dst.add(q), _mm256_castsi256_si128(x));
+                    _mm_storeu_si128(dst.add(8 + q), _mm256_extracti128_si256::<1>(x));
+                }
             }
         }
-        let mut l = 0;
-        while l * 64 < n {
-            let end = core::cmp::min(l * 64 + 64, n);
-            let mut sub = [0u64; 8];
-            for bit in 0 .. 8 {
-                sub[bit] = limbs[bit][l];
-            }
-            scatter64(&sub, &mut col[l * 64 .. end]);
-            l += 1;
-        }
+    }
+}
+
+/// [`crate::bs::word::transpose8`] on each u64 of `x`.
+#[inline(always)]
+unsafe fn transpose8x4(mut x: __m256i) -> __m256i {
+    unsafe {
+        let mut t;
+        t = _mm256_and_si256(
+            _mm256_xor_si256(x, _mm256_srli_epi64::<7>(x)),
+            _mm256_set1_epi64x(0x00AA_00AA_00AA_00AA),
+        );
+        x = _mm256_xor_si256(x, _mm256_xor_si256(t, _mm256_slli_epi64::<7>(t)));
+        t = _mm256_and_si256(
+            _mm256_xor_si256(x, _mm256_srli_epi64::<14>(x)),
+            _mm256_set1_epi64x(0x0000_CCCC_0000_CCCC),
+        );
+        x = _mm256_xor_si256(x, _mm256_xor_si256(t, _mm256_slli_epi64::<14>(t)));
+        t = _mm256_and_si256(
+            _mm256_xor_si256(x, _mm256_srli_epi64::<28>(x)),
+            _mm256_set1_epi64x(0x0000_0000_F0F0_F0F0),
+        );
+        _mm256_xor_si256(x, _mm256_xor_si256(t, _mm256_slli_epi64::<28>(t)))
     }
 }

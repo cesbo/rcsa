@@ -47,8 +47,16 @@ pub fn block_decypher<W: Word>(
         // (a)+(b): sbox_in = t[i+7] ^ kk[i]; raw = SBOX[in]   (one scalar lookup)
         {
             let src = &t[i + 7]; // scalar t6 on entry == t[i+7]
-            for g in 0 .. n {
-                raw[g] = crate::csa::BLOCK_SBOX[(src[g] ^ kk_i) as usize];
+            // u64 words keep LLVM from vectorizing into port-5-bound pextrb/pinsrb chains.
+            let k = u64::from(kk_i) * 0x0101_0101_0101_0101;
+            for g in (0 .. n).step_by(8) {
+                let x = u64::from_le_bytes(src[g .. g + 8].try_into().unwrap()) ^ k;
+                let mut y = 0u64;
+                for b in 0 .. 8 {
+                    y |=
+                        u64::from(crate::csa::BLOCK_SBOX[(x >> (8 * b)) as u8 as usize]) << (8 * b);
+                }
+                raw[g .. g + 8].copy_from_slice(&y.to_le_bytes());
             }
         }
         // (c): t[i+6] ^= PERM[sbox_out]   (permutation via masked shifts)
