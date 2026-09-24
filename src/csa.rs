@@ -631,27 +631,46 @@ impl Csa {
     }
 
     pub fn decrypt(&mut self, src: &[u8], dest: &mut [u8]) {
-        let mut block: [u8; 8] = [0; 8];
+        dest[.. 188].copy_from_slice(&src[.. 188]);
+        self.decrypt_payload(&mut dest[4 .. 188]);
+    }
 
-        dest[.. 4].copy_from_slice(&src[.. 4]);
-        block.copy_from_slice(&src[4 .. 12]);
+    /// Descrambles a TS packet payload of any length in place. A payload under 8 bytes is
+    /// sent in the clear and stays as is; a trailing partial block is stream-cipher only.
+    pub fn decrypt_payload(&mut self, data: &mut [u8]) {
+        let blocks = data.len() / 8;
+        if blocks == 0 {
+            return;
+        }
+
+        let mut block: [u8; 8] = [0; 8];
+        block.copy_from_slice(&data[.. 8]);
 
         self.stream_init();
         self.stream_cypher_init(&block);
 
-        for i in 0 .. 22 {
+        for i in 0 .. blocks - 1 {
             self.block_decypher(&block);
             self.stream_cypher(&mut block);
 
             for j in 0 .. 8 {
-                block[j] ^= src[4 + i * 8 + 8 + j];
-                dest[4 + i * 8 + j] = block[j] ^ self.t[j]
+                block[j] ^= data[i * 8 + 8 + j];
+                data[i * 8 + j] = block[j] ^ self.t[j]
             }
         }
 
         self.block_decypher(&block);
 
-        dest[180 .. 188].copy_from_slice(&self.t[.. 8]);
+        data[(blocks - 1) * 8 .. blocks * 8].copy_from_slice(&self.t[.. 8]);
+
+        let residue = &mut data[blocks * 8 ..];
+        if !residue.is_empty() {
+            let mut ks = [0u8; 8];
+            self.stream_cypher(&mut ks);
+            for (b, k) in residue.iter_mut().zip(ks) {
+                *b ^= k;
+            }
+        }
     }
 
     pub fn encrypt(&mut self, src: &[u8], dest: &mut [u8]) {

@@ -59,25 +59,46 @@ impl CsaBatch {
             packets.len() % PKT == 0,
             "buffer length must be a multiple of 188"
         );
+        self.decrypt_dispatch(packets, None);
+    }
+
+    /// Descramble payloads of any length in place: `packets` holds 188-byte slots, each with
+    /// its payload at byte 4, and `blocks[i]` is the count of whole 8-byte blocks in slot
+    /// `i`'s payload (1 ..= 23). Bytes after a payload's trailing partial block are
+    /// overwritten.
+    pub(crate) fn decrypt_payloads_in_place(&self, packets: &mut [u8], blocks: &[u8]) {
+        assert!(
+            packets.len() == blocks.len() * PKT,
+            "one block count per 188-byte slot"
+        );
+        debug_assert!(blocks.iter().all(|&n| (1 ..= BLOCKS as u8).contains(&n)));
+        if blocks.iter().all(|&n| n == BLOCKS as u8) {
+            self.decrypt_dispatch(packets, None);
+        } else {
+            self.decrypt_dispatch(packets, Some(blocks));
+        }
+    }
+
+    fn decrypt_dispatch(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
         #[cfg(target_arch = "x86_64")]
         {
             let n = packets.len() / PKT;
             if n >= <crate::bs::avx2::W256 as Word>::LANES && crate::bs::avx2::available() {
                 // SAFETY: guarded by runtime AVX2 detection.
                 unsafe {
-                    self.descramble_avx2(packets);
+                    self.descramble_avx2(packets, blocks);
                 }
                 return;
             }
             if n >= <crate::bs::sse2::W128 as Word>::LANES {
                 // SAFETY: SSE2 is guaranteed present on every x86-64 target.
                 unsafe {
-                    self.descramble_sse2(packets);
+                    self.descramble_sse2(packets, blocks);
                 }
                 return;
             }
         }
-        self.descramble::<u64>(packets);
+        self.descramble::<u64>(packets, blocks);
     }
 
     /// Force the portable 64-wide backend (mainly for benchmarks/tests).
@@ -87,7 +108,7 @@ impl CsaBatch {
             packets.len() % PKT == 0,
             "buffer length must be a multiple of 188"
         );
-        self.descramble::<u64>(packets);
+        self.descramble::<u64>(packets, None);
     }
 
     /// Force the AVX2 256-wide backend. Panics if AVX2 is unavailable.
@@ -101,7 +122,7 @@ impl CsaBatch {
         assert!(crate::bs::avx2::available(), "AVX2 not available");
         // SAFETY: asserted above.
         unsafe {
-            self.descramble_avx2(packets);
+            self.descramble_avx2(packets, None);
         }
     }
 
@@ -116,33 +137,34 @@ impl CsaBatch {
         );
         // SAFETY: SSE2 is guaranteed present on every x86-64 target.
         unsafe {
-            self.descramble_sse2(packets);
+            self.descramble_sse2(packets, None);
         }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
-    unsafe fn descramble_avx2(&self, packets: &mut [u8]) {
-        self.descramble::<crate::bs::avx2::W256>(packets);
+    unsafe fn descramble_avx2(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
+        self.descramble::<crate::bs::avx2::W256>(packets, blocks);
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse2")]
-    unsafe fn descramble_sse2(&self, packets: &mut [u8]) {
-        self.descramble::<crate::bs::sse2::W128>(packets);
+    unsafe fn descramble_sse2(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
+        self.descramble::<crate::bs::sse2::W128>(packets, blocks);
     }
 
     // `inline(always)` throughout the W256 chain so it collapses into the
     // `descramble_avx2` `#[target_feature]` root and the SIMD ops fuse to AVX2.
     #[inline(always)]
-    fn descramble<W: Word>(&self, packets: &mut [u8]) {
+    fn descramble<W: Word>(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
         let ccw = ccw_bits::<W>(&self.cw);
         let total = packets.len() / PKT;
         let mut done = 0;
         while done < total {
             let lanes = core::cmp::min(W::LANES, total - done);
             let group = &mut packets[done * PKT .. (done + lanes) * PKT];
-            descramble_group::<W>(&self.kk, &ccw, group, lanes);
+            let group_blocks = blocks.map(|b| &b[done .. done + lanes]);
+            descramble_group::<W>(&self.kk, &ccw, group, lanes, group_blocks);
             done += lanes;
         }
     }
@@ -274,7 +296,13 @@ fn ccw_bits<W: Word>(cw: &[u8; 8]) -> [Nibble<W>; 16] {
 
 /// Descramble up to `W::LANES` packets (`lanes` valid) in place.
 #[inline(always)]
-fn descramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8], lanes: usize) {
+fn descramble_group<W: Word>(
+    kk: &[u8; 56],
+    ccw: &[Nibble<W>; 16],
+    group: &mut [u8],
+    lanes: usize,
+    blocks: Option<&[u8]>,
+) {
     // 1. Preload all 23 ciphertext blocks in BYTE domain (cheap strided gather), so writing
     //    plaintext back can never clobber ciphertext still needed.
     let mut ct = [[[0u8; MAX_LANES]; 8]; BLOCKS];
@@ -296,6 +324,8 @@ fn descramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [
     let mut block = ct[0];
     let mut ks_bytes = [[0u8; MAX_LANES]; 8];
     let mut pt = [[0u8; MAX_LANES]; 8];
+    // Keystream-only plaintext of a short lane's trailing partial block.
+    let mut tail = [[0u8; MAX_LANES]; 8];
 
     for i in 0 .. 22 {
         block_decypher::<W>(&mut t, &block, kk); // t[0..8] = byte-domain output
@@ -310,6 +340,9 @@ fn descramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [
                 pt[j][g] = nb ^ t[j][g]; // plaintext
             }
         }
+        if let Some(blocks) = blocks {
+            short_lanes(blocks, i, &block, &t, &mut pt, &mut tail);
+        }
         store_block_bytes(&pt, group, lanes, i);
     }
 
@@ -317,7 +350,37 @@ fn descramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [
     block_decypher::<W>(&mut t, &block, kk);
     let mut last = [[0u8; MAX_LANES]; 8];
     last.copy_from_slice(&t[0 .. 8]);
-    store_block_bytes(&last, group, lanes, 22);
+    if let Some(blocks) = blocks {
+        short_lanes(blocks, BLOCKS - 1, &block, &t, &mut last, &mut tail);
+    }
+    store_block_bytes(&last, group, lanes, BLOCKS - 1);
+}
+
+/// Fixes block `i` of the lanes whose payload ends early: the last whole block is the bare
+/// block-cipher output and the partial block after it is keystream XOR ciphertext only.
+/// Blocks past a lane's payload are left as garbage.
+#[inline(always)]
+fn short_lanes(
+    blocks: &[u8],
+    i: usize,
+    block: &[[u8; MAX_LANES]; 8],
+    t: &[[u8; MAX_LANES]; 64],
+    pt: &mut [[u8; MAX_LANES]; 8],
+    tail: &mut [[u8; MAX_LANES]; 8],
+) {
+    for (g, &n) in blocks.iter().enumerate() {
+        let n = n as usize;
+        if i + 1 == n {
+            for j in 0 .. 8 {
+                tail[j][g] = block[j][g];
+                pt[j][g] = t[j][g];
+            }
+        } else if i == n {
+            for j in 0 .. 8 {
+                pt[j][g] = tail[j][g];
+            }
+        }
+    }
 }
 
 /// Scramble up to `W::LANES` packets (`lanes` valid) in place.
@@ -376,7 +439,10 @@ fn scramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Csa;
+    use crate::{
+        Csa,
+        bs::word::HDR,
+    };
 
     include!("../../fixtures/dvb_csa.rs");
 
@@ -741,6 +807,37 @@ mod tests {
             }
             CsaBatch::new(&cw).encrypt_in_place(&mut buf);
             assert_eq!(buf, expect, "count {count}");
+        }
+    }
+
+    /// `decrypt_payloads_in_place` matches the scalar `decrypt_payload` for every payload
+    /// length, mixed in one batch, at every dispatched width.
+    #[test]
+    fn payloads_vs_scalar() {
+        let mut rng = Rng(7);
+        for n in [1usize, 63, 64, 130, 300] {
+            let cw: [u8; 8] = core::array::from_fn(|_| rng.byte());
+            let lens: Vec<usize> = (0 .. n).map(|_| 8 + (rng.next() % 177) as usize).collect();
+            let mut buf = vec![0u8; n * PKT];
+            for (slot, &len) in buf.chunks_exact_mut(PKT).zip(&lens) {
+                for b in &mut slot[HDR .. HDR + len] {
+                    *b = rng.byte();
+                }
+            }
+
+            let mut csa = Csa::default();
+            csa.set_cw(&cw);
+            let mut expected = buf.clone();
+            for (slot, &len) in expected.chunks_exact_mut(PKT).zip(&lens) {
+                csa.decrypt_payload(&mut slot[HDR .. HDR + len]);
+            }
+
+            let blocks: Vec<u8> = lens.iter().map(|&len| (len / 8) as u8).collect();
+            CsaBatch::new(&cw).decrypt_payloads_in_place(&mut buf, &blocks);
+            for (p, &len) in lens.iter().enumerate() {
+                let r = p * PKT + HDR .. p * PKT + HDR + len;
+                assert_eq!(buf[r.clone()], expected[r], "n {n} lane {p} len {len}");
+            }
         }
     }
 }

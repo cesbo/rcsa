@@ -6,6 +6,7 @@ mod bs;
 mod csa;
 mod key;
 mod nibble;
+mod ts;
 
 pub(crate) use self::{
     bit_u1::Bit,
@@ -14,4 +15,8 @@ pub(crate) use self::{
 pub use self::{
     bs::CsaBatch,
     csa::Csa,
+    ts::{
+        Descrambler,
+        PACKET_SIZE,
+    },
 };
