@@ -53,7 +53,8 @@ impl CsaBatch {
     /// Picks the widest backend the batch actually *fills*:
     /// - AVX2 (256 lanes) for ≥256 packets when the CPU has it
     /// - SSE2 (128 lanes, x86-64 baseline) for ≥128 packets
-    /// - `u64` (64 lanes) on non-x86.
+    /// - NEON (128 lanes) for ≥128 packets on aarch64
+    /// - `u64` (64 lanes) otherwise.
     pub fn decrypt_in_place(&self, packets: &mut [u8]) {
         assert!(
             packets.len() % PKT == 0,
@@ -97,6 +98,11 @@ impl CsaBatch {
                 }
                 return;
             }
+        }
+        #[cfg(target_arch = "aarch64")]
+        if packets.len() / PKT >= <crate::bs::neon::W128 as Word>::LANES {
+            self.descramble::<crate::bs::neon::W128>(packets, blocks);
+            return;
         }
         self.descramble::<u64>(packets, blocks);
     }
@@ -175,7 +181,8 @@ impl CsaBatch {
     /// Picks the widest backend the batch actually *fills*:
     /// - AVX2 (256 lanes) for ≥256 packets when the CPU has it
     /// - SSE2 (128 lanes, x86-64 baseline) for ≥128 packets
-    /// - `u64` (64 lanes) on non-x86.
+    /// - NEON (128 lanes) for ≥128 packets on aarch64
+    /// - `u64` (64 lanes) otherwise.
     pub fn encrypt_in_place(&self, packets: &mut [u8]) {
         assert!(
             packets.len() % PKT == 0,
@@ -198,6 +205,11 @@ impl CsaBatch {
                 }
                 return;
             }
+        }
+        #[cfg(target_arch = "aarch64")]
+        if packets.len() / PKT >= <crate::bs::neon::W128 as Word>::LANES {
+            self.scramble::<crate::bs::neon::W128>(packets);
+            return;
         }
         self.scramble::<u64>(packets);
     }
