@@ -26,3 +26,17 @@ descrambler.descramble(&mut packets);
 
 When a new control word takes effect is up to the caller: `set_even`/`set_odd`
 replace the key immediately.
+
+## Performance
+
+Descrambling real SD and HD channels, one core of a Xeon E5-2660 v3 (Haswell),
+buffers of 1024-4096 packets, payload Mbit/s. FFdecsa and libdvbcsa built with
+`-O3 -msse2`, rcsa with the default target (AVX2 picked at runtime):
+
+| | Mbit/s |
+|---|---:|
+| rcsa | 1230-1280 |
+| FFdecsa | 1070-1090 |
+| libdvbcsa | 750-765 |
+
+Without AVX2 (SSE2) rcsa does about 980 Mbit/s on the same CPU.

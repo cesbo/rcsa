@@ -1,11 +1,10 @@
 //! Byte-domain port of the CSA block cipher (`Csa::block_decypher`, src/csa.rs).
 //!
 //! One byte per lane (packet). The 8->8 S-box is a scalar 256-entry table lookup
-//! per lane -- the work FFdecsa deliberately does NOT bitslice ("8 input bits are
-//! too many"). The bit permutation is a per-byte shuffle of 6 masked shifts (the
-//! `[1,7,5,4,2,6,0,3]` bit map, same as FFdecsa's B_FFSH8), applied over
-//! byte-planes so it autovectorizes; only the single S-box lookup stays scalar.
-//! There is no 663-gate circuit and no per-block bit transpose here.
+//! per lane: 8 input bits are too many for a cheap bitsliced circuit. The bit
+//! permutation is a per-byte shuffle of 6 masked shifts (the `[1,7,5,4,2,6,0,3]`
+//! bit map), applied over byte-planes so it autovectorizes; only the S-box lookup
+//! stays scalar.
 
 use crate::bs::word::{
     MAX_LANES,
