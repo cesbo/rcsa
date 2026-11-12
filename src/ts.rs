@@ -1,4 +1,5 @@
-//! TS layer: descrambles whole 188-byte packets in place with an even/odd control word pair.
+//! TS layer: descrambles and scrambles whole 188-byte packets in place with an even/odd
+//! control word pair.
 
 use crate::{
     Csa,
@@ -82,6 +83,106 @@ impl Descrambler {
         }
         if let Some(key) = odd {
             descramble_parity(packets, TSC_ODD, key, scratch, index, blocks);
+        }
+    }
+}
+
+/// Control word parity, the `transport_scrambling_control` value of a scrambled packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Parity {
+    Even,
+    Odd,
+}
+
+/// DVB-CSA scrambler for a TS stream.
+///
+/// Every clear packet with a payload is scrambled with the key of the requested parity and gets
+/// its `transport_scrambling_control` bits set. Packets without the sync byte, without a
+/// payload and already scrambled ones pass through untouched, and so does everything while the
+/// parity has no key yet. The payload after an adaptation field is scrambled too; a payload
+/// under 8 bytes is not scrambled by the standard and only gets the bits, which a descrambler
+/// clears again.
+///
+/// Packets that must stay clear (PSI) are simply not passed in: a call on a single packet or a
+/// short run is cheap.
+#[derive(Default)]
+pub struct Scrambler {
+    even: Option<Key>,
+    odd: Option<Key>,
+    scratch: Vec<u8>,
+    /// Byte offsets of the packets with a full 184-byte payload
+    index: Vec<usize>,
+}
+
+impl Scrambler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_even(&mut self, cw: &[u8; 8]) {
+        self.even = Some(Key::new(cw));
+    }
+
+    pub fn set_odd(&mut self, cw: &[u8; 8]) {
+        self.odd = Some(Key::new(cw));
+    }
+
+    /// Scrambles `packets` in place with the `parity` key; `packets.len()` must be a multiple
+    /// of 188. Larger buffers are faster: full payloads are scrambled as a batch, payloads
+    /// after an adaptation field one by one.
+    pub fn scramble(&mut self, packets: &mut [u8], parity: Parity) {
+        assert!(
+            packets.len().is_multiple_of(PACKET_SIZE),
+            "buffer length must be a multiple of 188"
+        );
+
+        let (key, tsc) = match parity {
+            Parity::Even => (&mut self.even, TSC_EVEN),
+            Parity::Odd => (&mut self.odd, TSC_ODD),
+        };
+        let Some(key) = key else {
+            return;
+        };
+        let index = &mut self.index;
+        index.clear();
+
+        for (i, ts) in packets.chunks_exact_mut(PACKET_SIZE).enumerate() {
+            if ts[0] != SYNC_BYTE || ts[3] & TSC_MASK != 0 {
+                continue;
+            }
+            let offset = match ts[3] & 0x30 {
+                0x10 => 4,
+                0x30 => 5 + ts[4] as usize,
+                _ => continue,
+            };
+            if offset >= PACKET_SIZE {
+                continue;
+            }
+            ts[3] |= tsc;
+
+            if offset == 4 {
+                index.push(i * PACKET_SIZE);
+            } else {
+                key.csa.encrypt_payload(&mut ts[offset ..]);
+            }
+        }
+
+        if index.len() < BATCH_MIN {
+            for &at in index.iter() {
+                key.csa
+                    .encrypt_payload(&mut packets[at + 4 .. at + PACKET_SIZE]);
+            }
+            return;
+        }
+
+        let scratch = &mut self.scratch;
+        scratch.clear();
+        for &at in index.iter() {
+            scratch.extend_from_slice(&packets[at .. at + PACKET_SIZE]);
+        }
+        key.batch.encrypt_in_place(scratch);
+        for (slot, &at) in scratch.chunks_exact(PACKET_SIZE).zip(index.iter()) {
+            packets[at + 4 .. at + PACKET_SIZE].copy_from_slice(&slot[4 ..]);
         }
     }
 }

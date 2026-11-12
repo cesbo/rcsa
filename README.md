@@ -5,6 +5,9 @@ Pure Rust DVB Common Scrambling Algorithm (DVB-CSA) for MPEG transport streams.
 - `Descrambler`: descrambles 188-byte TS packets in place with an even/odd control
   word pair. Payloads after an adaptation field and trailing partial blocks are
   handled; descrambled packets get their scrambling bits cleared.
+- `Scrambler`: the reverse, scrambles the payload of every clear packet with the
+  even or the odd control word and sets the scrambling bits. Which packets stay
+  clear (PSI) and when the parity switches is up to the caller.
 - `CsaBatch`: bitsliced batch of full-payload packets, 64 lanes (`u64`), 128 lanes
   (SSE2, NEON) or 256 lanes (AVX2, detected at runtime). Decrypt and encrypt.
 - `Csa`: one packet at a time, any payload length.
@@ -22,6 +25,17 @@ descrambler.set_odd(&cw[8 ..].try_into()?);
 
 // a whole number of 188-byte packets; larger buffers are faster
 descrambler.descramble(&mut packets);
+```
+
+```rust
+use rcsa::{Parity, Scrambler};
+
+let mut scrambler = Scrambler::new();
+scrambler.set_even(&cw_even);
+scrambler.set_odd(&cw_odd);
+
+// packets that must stay clear are not passed in
+scrambler.scramble(&mut packets, Parity::Even);
 ```
 
 When a new control word takes effect is up to the caller: `set_even`/`set_odd`

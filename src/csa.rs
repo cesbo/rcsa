@@ -674,36 +674,37 @@ impl Csa {
     }
 
     pub fn encrypt(&mut self, src: &[u8], dest: &mut [u8]) {
-        dest[.. 4].copy_from_slice(&src[.. 4]);
+        dest[.. 188].copy_from_slice(&src[.. 188]);
+        self.encrypt_payload(&mut dest[4 .. 188]);
+    }
 
-        // Backward block-cipher chain: IB[22] = BC_inv(P[22]);
-        // IB[i] = BC_inv(P[i] ^ IB[i + 1]).
-        let mut ib = [[0u8; 8]; 23];
-        let mut last = [0u8; 8];
-        last.copy_from_slice(&src[4 + 22 * 8 .. 4 + 22 * 8 + 8]);
-        ib[22] = self.block_encypher(&last);
-
-        for i in (0 .. 22).rev() {
-            let mut x = [0u8; 8];
-            for j in 0 .. 8 {
-                x[j] = src[4 + i * 8 + j] ^ ib[i + 1][j];
-            }
-            ib[i] = self.block_encypher(&x);
+    /// Scrambles a TS packet payload of any length in place. A payload under 8 bytes is
+    /// sent in the clear and stays as is; a trailing partial block is stream-cipher only.
+    pub fn encrypt_payload(&mut self, data: &mut [u8]) {
+        let blocks = data.len() / 8;
+        if blocks == 0 {
+            return;
         }
 
-        // SB[0] = IB[0]: block 0 is the stream seed, not keystream-XORed.
-        dest[4 .. 12].copy_from_slice(&ib[0]);
+        // Backward block-cipher chain: IB[last] = BC(P[last]), IB[i] = BC(P[i] ^ IB[i + 1])
+        let mut ib = [0u8; 8];
+        for block in data[.. blocks * 8].rchunks_exact_mut(8) {
+            let mut x = [0u8; 8];
+            for j in 0 .. 8 {
+                x[j] = block[j] ^ ib[j];
+            }
+            ib = self.block_encypher(&x);
+            block.copy_from_slice(&ib);
+        }
 
-        let seed = ib[0];
+        // IB[0] goes out as is and seeds the stream cipher for everything after it
         self.stream_init();
-        self.stream_cypher_init(&seed);
-
-        // SB[k] = IB[k] ^ KS[k - 1] for k = 1 .. 22.
-        for k in 1 .. 23 {
+        self.stream_cypher_init(&ib);
+        for chunk in data[8 ..].chunks_mut(8) {
             let mut ks = [0u8; 8];
             self.stream_cypher(&mut ks);
-            for j in 0 .. 8 {
-                dest[4 + k * 8 + j] = ib[k][j] ^ ks[j];
+            for (b, k) in chunk.iter_mut().zip(ks) {
+                *b ^= k;
             }
         }
     }

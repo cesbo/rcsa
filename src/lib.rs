@@ -1,5 +1,5 @@
 //! Pure-Rust implementation of the DVB-CSA (Common Scrambling Algorithm)
-//! descrambler used in DVB transport streams.
+//! descrambler and scrambler used in DVB transport streams.
 
 mod bit_u1;
 mod bs;
@@ -18,5 +18,7 @@ pub use self::{
     ts::{
         Descrambler,
         PACKET_SIZE,
+        Parity,
+        Scrambler,
     },
 };
