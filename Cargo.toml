@@ -1,6 +1,6 @@
 [package]
 name = "rcsa"
-version = "0.2.0"
+version = "0.2.1"
 description = "DVB Common Scrambling Algorithm (CSA) descrambler and scrambler for MPEG-TS"
 authors = ["Cesbo Developers Team <info@cesbo.com>"]
 license = "MIT"
@@ -19,3 +19,7 @@ criterion = "0.8"
 [[bench]]
 name = "decrypt"
 harness = false
+
+# The batch-size sweeps take minutes unoptimized; debug assertions and overflow checks stay on.
+[profile.test]
+opt-level = 2

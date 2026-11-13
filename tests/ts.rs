@@ -62,7 +62,7 @@ fn af_packet(tsc: u8, payload: &[u8], clear: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// Even and odd keys, full payloads and payloads of every fixture length after an adaptation
-/// field, on the scalar path (few packets) and on every batch width.
+/// field, on the scalar path (few packets) and in partial and full batches.
 #[test]
 fn descramble_mixed_stream() {
     let short: Vec<_> = PAYLOADS.iter().filter(|(c, _)| c.len() < 184).collect();
@@ -148,7 +148,7 @@ fn fixture_packet(clear: &[u8], scrambled: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// Packets of every fixture length match libdvbcsa, on the scalar path (few packets) and on
-/// every batch width.
+/// partial and full batches.
 #[test]
 fn scramble_matches_oracle() {
     let (full, short): (Vec<_>, Vec<_>) = PAYLOADS.iter().partition(|(c, _)| c.len() == 184);
@@ -277,6 +277,61 @@ fn scramble_round_trip() {
     d.set_odd(&CW);
     d.descramble(&mut stream);
     assert!(stream == clear);
+}
+
+/// Every batch size from 1 to 600 and a few large ones, as windows of the mixed stream and as
+/// runs of full payloads: the scrambler matches a packet-at-a-time reference and the
+/// descrambler restores the input.
+#[test]
+fn batch_sizes() {
+    // A call on a single packet takes the scalar path
+    let reference = |stream: &[u8], parity: Parity| {
+        let mut s = Scrambler::new();
+        s.set_even(&PAYLOAD_CW);
+        s.set_odd(&CW);
+        let mut out = stream.to_vec();
+        for ts in out.chunks_exact_mut(PACKET_SIZE) {
+            s.scramble(ts, parity);
+        }
+        out
+    };
+
+    let mixed = mixed_stream().repeat(3);
+    let full: Vec<u8> = mixed
+        .chunks_exact(PACKET_SIZE)
+        .filter(|ts| ts[3] == 0x10)
+        .flatten()
+        .copied()
+        .collect();
+    let total = mixed.len().min(full.len()) / PACKET_SIZE;
+    assert!(total > 2000);
+
+    let mut s = Scrambler::new();
+    s.set_even(&PAYLOAD_CW);
+    s.set_odd(&CW);
+    let mut d = Descrambler::new();
+    d.set_even(&PAYLOAD_CW);
+    d.set_odd(&CW);
+
+    for clear in [&mixed, &full] {
+        let even = reference(clear, Parity::Even);
+        let odd = reference(clear, Parity::Odd);
+        for n in (1 ..= 600).chain([777, 1024, 2000, total]) {
+            let (parity, expected) = if n % 2 == 0 {
+                (Parity::Even, &even)
+            } else {
+                (Parity::Odd, &odd)
+            };
+            let at = (n * 37) % (total - n + 1) * PACKET_SIZE;
+            let window = at .. at + n * PACKET_SIZE;
+
+            let mut buf = clear[window.clone()].to_vec();
+            s.scramble(&mut buf, parity);
+            assert!(buf == expected[window.clone()], "scramble {n} packets");
+            d.descramble(&mut buf);
+            assert!(buf == clear[window], "descramble {n} packets");
+        }
+    }
 }
 
 /// A lost sync byte, scrambled packets, packets without a payload and a broken adaptation

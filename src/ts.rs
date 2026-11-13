@@ -13,9 +13,9 @@ const TSC_MASK: u8 = 0xC0;
 const TSC_EVEN: u8 = 0x80;
 const TSC_ODD: u8 = 0xC0;
 
-/// Fewer packets of one parity than this go through the scalar path: a batch costs a whole
-/// 64-lane word however few lanes are filled, about 3 scalar packets.
-const BATCH_MIN: usize = 4;
+/// Fewer packets of one parity than this go through the scalar path: the smallest batch
+/// costs between one and two scalar packets.
+const BATCH_MIN: usize = 2;
 
 struct Key {
     csa: Csa,

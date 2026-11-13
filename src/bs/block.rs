@@ -26,8 +26,8 @@ fn perm_byte(x: u8) -> u8 {
 }
 
 /// Decrypt one 8-byte block in byte domain. On entry `ib` holds the 8 input
-/// byte-planes; on exit `t[0..8]` holds the block output. Processes `W::LANES`
-/// lanes (padding lanes are harmless). Faithful, per lane, to the scalar
+/// byte-planes; on exit `t[0..8]` holds the block output. Processes the first
+/// `lanes` lanes, rounded up (padding lanes are harmless). Faithful, per lane, to the scalar
 /// `Csa::block_decypher`: `t6` on entry to round `i` is plane `t[i+7]`; the S-box
 /// output feeds the `t[i+6]` update *permuted* and the `t[i+4..=i]` updates *raw*.
 #[inline(always)]
@@ -35,35 +35,56 @@ pub fn block_decypher<W: Word>(
     t: &mut [[u8; MAX_LANES]; 64],
     ib: &[[u8; MAX_LANES]; 8],
     kk: &[u8; 56],
+    lanes: usize,
 ) {
-    let n = W::LANES;
+    // Above 3/4 of a group the constant width costs less than the runtime one. Below it the
+    // S-box runs over whole u64 words and the byte loops over a multiple of 32 lanes, which
+    // keeps them out of the scalar remainder; the clamps keep the bounds checks out.
+    if lanes > W::LANES / 4 * 3 {
+        decypher(t, ib, kk, W::LANES, W::LANES)
+    } else {
+        let n = lanes.next_multiple_of(8).min(W::LANES);
+        decypher(t, ib, kk, n, lanes.next_multiple_of(32).min(W::LANES))
+    }
+}
+
+/// S-box of one byte-plane: `dst = SBOX[src ^ k]` over `n` lanes, `n` a multiple of 8.
+/// u64 words keep LLVM from vectorizing into port-5-bound pextrb/pinsrb chains.
+#[inline(always)]
+fn sbox_plane(dst: &mut [u8; MAX_LANES], src: &[u8; MAX_LANES], k: u8, n: usize) {
+    let k = u64::from(k) * 0x0101_0101_0101_0101;
+    for g in (0 .. n).step_by(8) {
+        let x = u64::from_le_bytes(src[g .. g + 8].try_into().unwrap()) ^ k;
+        let mut y = 0u64;
+        for b in 0 .. 8 {
+            y |= u64::from(crate::csa::BLOCK_SBOX[(x >> (8 * b)) as u8 as usize]) << (8 * b);
+        }
+        dst[g .. g + 8].copy_from_slice(&y.to_le_bytes());
+    }
+}
+
+/// `n` lanes go through the S-box and `m >= n` through the byte loops.
+#[inline(always)]
+fn decypher(
+    t: &mut [[u8; MAX_LANES]; 64],
+    ib: &[[u8; MAX_LANES]; 8],
+    kk: &[u8; 56],
+    n: usize,
+    m: usize,
+) {
     for j in 0 .. 8 {
         t[56 + j] = ib[j]; // t[56..64] = ib
     }
     let mut raw = [0u8; MAX_LANES];
     for i in (0 ..= 55).rev() {
-        let kk_i = kk[i];
-        // (a)+(b): sbox_in = t[i+7] ^ kk[i]; raw = SBOX[in]   (one scalar lookup)
-        {
-            let src = &t[i + 7]; // scalar t6 on entry == t[i+7]
-            // u64 words keep LLVM from vectorizing into port-5-bound pextrb/pinsrb chains.
-            let k = u64::from(kk_i) * 0x0101_0101_0101_0101;
-            for g in (0 .. n).step_by(8) {
-                let x = u64::from_le_bytes(src[g .. g + 8].try_into().unwrap()) ^ k;
-                let mut y = 0u64;
-                for b in 0 .. 8 {
-                    y |=
-                        u64::from(crate::csa::BLOCK_SBOX[(x >> (8 * b)) as u8 as usize]) << (8 * b);
-                }
-                raw[g .. g + 8].copy_from_slice(&y.to_le_bytes());
-            }
-        }
+        // (a)+(b): raw = SBOX[t[i+7] ^ kk[i]]; scalar t6 on entry == t[i+7]
+        sbox_plane(&mut raw, &t[i + 7], kk[i], n);
         // (c): t[i+6] ^= PERM[sbox_out]   (permutation via masked shifts)
-        for g in 0 .. n {
+        for g in 0 .. m {
             t[i + 6][g] ^= perm_byte(raw[g]);
         }
         // (d): so = sbox_out ^ t[i+8]; t[i+4]^=so; t[i+3]^=so; t[i+2]^=so; t[i]=so
-        for g in 0 .. n {
+        for g in 0 .. m {
             let so = raw[g] ^ t[i + 8][g];
             t[i + 4][g] ^= so;
             t[i + 3][g] ^= so;
@@ -73,57 +94,86 @@ pub fn block_decypher<W: Word>(
     }
 }
 
-/// Invert the CSA block cipher for one 8-byte block in the byte domain
-/// (`W::LANES` lanes, one byte per lane; padding lanes are harmless). On entry `p`
+/// Scratch of [`block_encypher`], zeroed once per group. Round i lives in row i + 6 of `so`
+/// and `s`: the six rows below are never written and stand for the rounds before the first,
+/// which keeps the round body free of branches and lets it vectorize. Every other row is
+/// written before it is read, so the scratch carries nothing from block to block.
+pub struct Encypher {
+    t: [[u8; MAX_LANES]; 64],
+    so: [[u8; MAX_LANES]; 62],
+    s: [[u8; MAX_LANES]; 62],
+}
+
+impl Encypher {
+    pub fn new() -> Self {
+        Encypher {
+            t: [[0; MAX_LANES]; 64],
+            so: [[0; MAX_LANES]; 62],
+            s: [[0; MAX_LANES]; 62],
+        }
+    }
+}
+
+/// Invert the CSA block cipher for one 8-byte block in the byte domain (the first `lanes`
+/// lanes, rounded up, one byte per lane; padding lanes are harmless). On entry `p`
 /// holds the byte-planes of the block-cipher output; on exit `out_ib` holds the
 /// byte-planes of the input that produce `p`. The cipher's shift register is run
 /// forward (`t[0..8] = p`, 56 rounds of S-box + feedback), then the input block is
 /// read from `t[56..64]` with the low six bytes corrected for the mixed-in feedback.
 #[inline(always)]
 pub fn block_encypher<W: Word>(
+    e: &mut Encypher,
     p: &[[u8; MAX_LANES]; 8],
     kk: &[u8; 56],
     out_ib: &mut [[u8; MAX_LANES]; 8],
+    lanes: usize,
 ) {
-    let n = W::LANES;
-    let mut t = [[0u8; MAX_LANES]; 64];
+    // Same widths as `block_decypher`.
+    if lanes > W::LANES / 4 * 3 {
+        encypher(e, p, kk, out_ib, W::LANES, W::LANES)
+    } else {
+        let n = lanes.next_multiple_of(8).min(W::LANES);
+        encypher(
+            e,
+            p,
+            kk,
+            out_ib,
+            n,
+            lanes.next_multiple_of(32).min(W::LANES),
+        )
+    }
+}
+
+#[inline(always)]
+fn encypher(
+    e: &mut Encypher,
+    p: &[[u8; MAX_LANES]; 8],
+    kk: &[u8; 56],
+    out_ib: &mut [[u8; MAX_LANES]; 8],
+    n: usize,
+    m: usize,
+) {
+    let Encypher { t, so, s } = e;
     for j in 0 .. 8 {
         t[j] = p[j]; // t[0..8] = p
     }
-    let mut so = [[0u8; MAX_LANES]; 56];
-    let mut s = [[0u8; MAX_LANES]; 56];
     for i in 0 .. 56 {
-        let kk_i = kk[i];
-        // sbox_in = t[i+7] ^ kk[i]; s = SBOX[in]   (one scalar lookup)
-        for g in 0 .. n {
-            s[i][g] = crate::csa::BLOCK_SBOX[(t[i + 7][g] ^ kk_i) as usize];
-        }
+        // s = SBOX[t[i+7] ^ kk[i]]
+        sbox_plane(&mut s[i + 6], &t[i + 7], kk[i], n);
         // so[i] = t[i] ^ so[i-2] ^ so[i-3] ^ so[i-4] ^ PERM(s[i-6]); t[i+8] = s[i] ^ so[i]
-        for g in 0 .. n {
-            let mut o = t[i][g];
-            if i >= 2 {
-                o ^= so[i - 2][g];
-            }
-            if i >= 3 {
-                o ^= so[i - 3][g];
-            }
-            if i >= 4 {
-                o ^= so[i - 4][g];
-            }
-            if i >= 6 {
-                o ^= perm_byte(s[i - 6][g]);
-            }
-            so[i][g] = o;
-            t[i + 8][g] = s[i][g] ^ o;
+        for g in 0 .. m {
+            let o = t[i][g] ^ so[i + 4][g] ^ so[i + 3][g] ^ so[i + 2][g] ^ perm_byte(s[i][g]);
+            so[i + 6][g] = o;
+            t[i + 8][g] = s[i + 6][g] ^ o;
         }
     }
-    for g in 0 .. n {
-        out_ib[0][g] = t[56][g] ^ so[54][g] ^ so[53][g] ^ so[52][g] ^ perm_byte(s[50][g]);
-        out_ib[1][g] = t[57][g] ^ so[55][g] ^ so[54][g] ^ so[53][g] ^ perm_byte(s[51][g]);
-        out_ib[2][g] = t[58][g] ^ so[55][g] ^ so[54][g] ^ perm_byte(s[52][g]);
-        out_ib[3][g] = t[59][g] ^ so[55][g] ^ perm_byte(s[53][g]);
-        out_ib[4][g] = t[60][g] ^ perm_byte(s[54][g]);
-        out_ib[5][g] = t[61][g] ^ perm_byte(s[55][g]);
+    for g in 0 .. m {
+        out_ib[0][g] = t[56][g] ^ so[60][g] ^ so[59][g] ^ so[58][g] ^ perm_byte(s[56][g]);
+        out_ib[1][g] = t[57][g] ^ so[61][g] ^ so[60][g] ^ so[59][g] ^ perm_byte(s[57][g]);
+        out_ib[2][g] = t[58][g] ^ so[61][g] ^ so[60][g] ^ perm_byte(s[58][g]);
+        out_ib[3][g] = t[59][g] ^ so[61][g] ^ perm_byte(s[59][g]);
+        out_ib[4][g] = t[60][g] ^ perm_byte(s[60][g]);
+        out_ib[5][g] = t[61][g] ^ perm_byte(s[61][g]);
         out_ib[6][g] = t[62][g];
         out_ib[7][g] = t[63][g];
     }
@@ -185,7 +235,7 @@ mod tests {
                 }
             }
             let mut t = [[0u8; MAX_LANES]; 64];
-            block_decypher::<u64>(&mut t, &ib, &kk);
+            block_decypher::<u64>(&mut t, &ib, &kk, 64);
             for g in 0 .. 64 {
                 let exp = scalar_block(&inputs[g], &kk);
                 for j in 0 .. 8 {
@@ -202,6 +252,8 @@ mod tests {
             s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
             (s >> 33) as u8
         };
+        // One scratch for every iteration: nothing may leak from block to block.
+        let mut e = Encypher::new();
         for _ in 0 .. 500 {
             let mut kk = [0u8; 56];
             for k in kk.iter_mut() {
@@ -221,7 +273,7 @@ mod tests {
                 }
             }
             let mut rec = [[0u8; MAX_LANES]; 8];
-            block_encypher::<u64>(&p, &kk, &mut rec);
+            block_encypher::<u64>(&mut e, &p, &kk, &mut rec, 64);
             for g in 0 .. 64 {
                 for j in 0 .. 8 {
                     assert_eq!(rec[j][g], inputs[g][j], "lane {g} byte {j}");
