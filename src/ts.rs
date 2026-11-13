@@ -110,8 +110,9 @@ pub struct Scrambler {
     even: Option<Key>,
     odd: Option<Key>,
     scratch: Vec<u8>,
-    /// Byte offsets of the packets with a full 184-byte payload
-    index: Vec<usize>,
+    /// Payloads to scramble: byte offset in the input and length
+    index: Vec<(usize, usize)>,
+    blocks: Vec<u8>,
 }
 
 impl Scrambler {
@@ -128,8 +129,7 @@ impl Scrambler {
     }
 
     /// Scrambles `packets` in place with the `parity` key; `packets.len()` must be a multiple
-    /// of 188. Larger buffers are faster: full payloads are scrambled as a batch, payloads
-    /// after an adaptation field one by one.
+    /// of 188. Larger buffers are faster: the payloads are scrambled as a batch.
     pub fn scramble(&mut self, packets: &mut [u8], parity: Parity) {
         assert!(
             packets.len().is_multiple_of(PACKET_SIZE),
@@ -160,29 +160,30 @@ impl Scrambler {
             }
             ts[3] |= tsc;
 
-            if offset == 4 {
-                index.push(i * PACKET_SIZE);
-            } else {
-                key.csa.encrypt_payload(&mut ts[offset ..]);
+            if offset + 8 <= PACKET_SIZE {
+                index.push((i * PACKET_SIZE + offset, PACKET_SIZE - offset));
             }
         }
 
         if index.len() < BATCH_MIN {
-            for &at in index.iter() {
-                key.csa
-                    .encrypt_payload(&mut packets[at + 4 .. at + PACKET_SIZE]);
+            for &(at, len) in index.iter() {
+                key.csa.encrypt_payload(&mut packets[at .. at + len]);
             }
             return;
         }
 
         let scratch = &mut self.scratch;
+        let blocks = &mut self.blocks;
         scratch.clear();
-        for &at in index.iter() {
-            scratch.extend_from_slice(&packets[at .. at + PACKET_SIZE]);
+        scratch.resize(index.len() * PACKET_SIZE, 0);
+        blocks.clear();
+        for (slot, &(at, len)) in scratch.chunks_exact_mut(PACKET_SIZE).zip(index.iter()) {
+            slot[4 .. 4 + len].copy_from_slice(&packets[at .. at + len]);
+            blocks.push((len / 8) as u8);
         }
-        key.batch.encrypt_in_place(scratch);
-        for (slot, &at) in scratch.chunks_exact(PACKET_SIZE).zip(index.iter()) {
-            packets[at + 4 .. at + PACKET_SIZE].copy_from_slice(&slot[4 ..]);
+        key.batch.encrypt_payloads_in_place(scratch, blocks);
+        for (slot, &(at, len)) in scratch.chunks_exact(PACKET_SIZE).zip(index.iter()) {
+            packets[at .. at + len].copy_from_slice(&slot[4 .. 4 + len]);
         }
     }
 }

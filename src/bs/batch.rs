@@ -183,18 +183,39 @@ impl CsaBatch {
             packets.len() % PKT == 0,
             "buffer length must be a multiple of 188"
         );
+        self.encrypt_dispatch(packets, None);
+    }
+
+    /// Scramble payloads of any length in place: `packets` holds 188-byte slots, each with
+    /// its payload at byte 4, and `blocks[i]` is the count of whole 8-byte blocks in slot
+    /// `i`'s payload (1 ..= 23). Bytes after a payload's trailing partial block are
+    /// overwritten.
+    pub(crate) fn encrypt_payloads_in_place(&self, packets: &mut [u8], blocks: &[u8]) {
+        assert!(
+            packets.len() == blocks.len() * PKT,
+            "one block count per 188-byte slot"
+        );
+        debug_assert!(blocks.iter().all(|&n| (1 ..= BLOCKS as u8).contains(&n)));
+        if blocks.iter().all(|&n| n == BLOCKS as u8) {
+            self.encrypt_dispatch(packets, None);
+        } else {
+            self.encrypt_dispatch(packets, Some(blocks));
+        }
+    }
+
+    fn encrypt_dispatch(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
         #[cfg(target_arch = "x86_64")]
         if crate::bs::avx2::available() {
             // SAFETY: guarded by runtime AVX2 detection.
-            unsafe { self.scramble_avx2(packets) }
+            unsafe { self.scramble_avx2(packets, blocks) }
         } else {
             // SAFETY: SSE2 is guaranteed present on every x86-64 target.
-            unsafe { self.scramble_sse2(packets) }
+            unsafe { self.scramble_sse2(packets, blocks) }
         }
         #[cfg(target_arch = "aarch64")]
-        self.scramble::<crate::bs::neon::W128>(packets);
+        self.scramble::<crate::bs::neon::W128>(packets, blocks);
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        self.scramble::<u64>(packets);
+        self.scramble::<u64>(packets, blocks);
     }
 
     /// Force the portable 64-wide backend (mainly for benchmarks/tests).
@@ -204,7 +225,7 @@ impl CsaBatch {
             packets.len() % PKT == 0,
             "buffer length must be a multiple of 188"
         );
-        self.scramble::<u64>(packets);
+        self.scramble::<u64>(packets, None);
     }
 
     /// Force the AVX2 256-wide backend. Panics if AVX2 is unavailable.
@@ -218,7 +239,7 @@ impl CsaBatch {
         assert!(crate::bs::avx2::available(), "AVX2 not available");
         // SAFETY: asserted above.
         unsafe {
-            self.scramble_avx2(packets);
+            self.scramble_avx2(packets, None);
         }
     }
 
@@ -233,33 +254,34 @@ impl CsaBatch {
         );
         // SAFETY: SSE2 is guaranteed present on every x86-64 target.
         unsafe {
-            self.scramble_sse2(packets);
+            self.scramble_sse2(packets, None);
         }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
-    unsafe fn scramble_avx2(&self, packets: &mut [u8]) {
-        self.scramble::<crate::bs::avx2::W256>(packets);
+    unsafe fn scramble_avx2(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
+        self.scramble::<crate::bs::avx2::W256>(packets, blocks);
     }
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse2")]
-    unsafe fn scramble_sse2(&self, packets: &mut [u8]) {
-        self.scramble::<crate::bs::sse2::W128>(packets);
+    unsafe fn scramble_sse2(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
+        self.scramble::<crate::bs::sse2::W128>(packets, blocks);
     }
 
     // `inline(always)` throughout the W256 chain so it collapses into the
     // `scramble_avx2` `#[target_feature]` root and the SIMD ops fuse to AVX2.
     #[inline(always)]
-    fn scramble<W: Word>(&self, packets: &mut [u8]) {
+    fn scramble<W: Word>(&self, packets: &mut [u8], blocks: Option<&[u8]>) {
         let ccw = ccw_bits::<W>(&self.cw);
         let total = packets.len() / PKT;
         let mut done = 0;
         while done < total {
             let lanes = core::cmp::min(W::LANES, total - done);
             let group = &mut packets[done * PKT .. (done + lanes) * PKT];
-            scramble_group::<W>(&self.kk, &ccw, group, lanes);
+            let group_blocks = blocks.map(|b| &b[done .. done + lanes]);
+            scramble_group::<W>(&self.kk, &ccw, group, lanes, group_blocks);
             done += lanes;
         }
     }
@@ -380,7 +402,13 @@ fn short_lanes(
 
 /// Scramble up to `W::LANES` packets (`lanes` valid) in place.
 #[inline(always)]
-fn scramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8], lanes: usize) {
+fn scramble_group<W: Word>(
+    kk: &[u8; 56],
+    ccw: &[Nibble<W>; 16],
+    group: &mut [u8],
+    lanes: usize,
+    blocks: Option<&[u8]>,
+) {
     // 1. Load all 23 plaintext blocks in BYTE domain (cheap strided gather).
     let mut p = [[[0u8; MAX_LANES]; 8]; BLOCKS];
     for k in 0 .. BLOCKS {
@@ -388,7 +416,8 @@ fn scramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8
     }
 
     // 2. Backward block-cipher chain: IB[22] = BCinv(P[22]); IB[i] = BCinv(P[i] ^ IB[i+1]) for i =
-    //    21..=0.
+    //    21..=0. A lane whose payload ends early starts its chain at its last whole block: the
+    //    blocks after it go through the cipher as garbage and are not chained in.
     let mut ib = [[[0u8; MAX_LANES]; 8]; BLOCKS];
     let mut e = Encypher::new();
     block_encypher::<W>(&mut e, &p[22], kk, &mut ib[22], lanes);
@@ -399,7 +428,28 @@ fn scramble_group<W: Word>(kk: &[u8; 56], ccw: &[Nibble<W>; 16], group: &mut [u8
                 x[j][g] = p[i][j][g] ^ ib[i + 1][j][g];
             }
         }
+        if let Some(blocks) = blocks {
+            for (g, &n) in blocks.iter().enumerate() {
+                if n as usize == i + 1 {
+                    for j in 0 .. 8 {
+                        x[j][g] = p[i][j][g];
+                    }
+                }
+            }
+        }
         block_encypher::<W>(&mut e, &x, kk, &mut ib[i], lanes);
+    }
+
+    // The partial block after a short lane's last whole one is plaintext XOR keystream only.
+    if let Some(blocks) = blocks {
+        for (g, &n) in blocks.iter().enumerate() {
+            let n = n as usize;
+            if n < BLOCKS {
+                for j in 0 .. 8 {
+                    ib[n][j][g] = p[n][j][g];
+                }
+            }
+        }
     }
 
     // 3. SB[0] = IB[0]: block 0 is the stream seed, not keystream-XORed.
@@ -915,6 +965,67 @@ mod tests {
             for (p, &len) in lens.iter().enumerate() {
                 let r = p * PKT + HDR .. p * PKT + HDR + len;
                 assert_eq!(buf[r.clone()], expected[r], "n {n} lane {p} len {len}");
+            }
+        }
+    }
+
+    /// `encrypt_payloads_in_place` matches the scalar `encrypt_payload` for every payload
+    /// length, mixed in one batch, in partial and full groups.
+    #[test]
+    fn encrypt_payloads_vs_scalar() {
+        let mut rng = Rng(11);
+        for n in [1usize, 63, 64, 130, 300, 700] {
+            let cw: [u8; 8] = core::array::from_fn(|_| rng.byte());
+            // every length 8 ..= 184 shows up in the larger batches
+            let lens: Vec<usize> = (0 .. n)
+                .map(|p| {
+                    if n >= 300 {
+                        8 + p % 177
+                    } else {
+                        8 + (rng.next() % 177) as usize
+                    }
+                })
+                .collect();
+            let mut buf = vec![0u8; n * PKT];
+            for (slot, &len) in buf.chunks_exact_mut(PKT).zip(&lens) {
+                for b in &mut slot[HDR .. HDR + len] {
+                    *b = rng.byte();
+                }
+            }
+
+            let mut csa = Csa::default();
+            csa.set_cw(&cw);
+            let mut expected = buf.clone();
+            for (slot, &len) in expected.chunks_exact_mut(PKT).zip(&lens) {
+                csa.encrypt_payload(&mut slot[HDR .. HDR + len]);
+            }
+
+            let blocks: Vec<u8> = lens.iter().map(|&len| (len / 8) as u8).collect();
+            let batch = CsaBatch::new(&cw);
+            let mut wide = buf.clone();
+            batch.encrypt_payloads_in_place(&mut wide, &blocks);
+            let mut narrow = buf.clone();
+            batch.scramble::<u64>(&mut narrow, Some(&blocks));
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: SSE2 is guaranteed present on every x86-64 target.
+            unsafe {
+                batch.scramble_sse2(&mut buf, Some(&blocks));
+            }
+            #[cfg(not(target_arch = "x86_64"))]
+            buf.copy_from_slice(&narrow);
+            for (p, &len) in lens.iter().enumerate() {
+                let r = p * PKT + HDR .. p * PKT + HDR + len;
+                assert_eq!(
+                    wide[r.clone()],
+                    expected[r.clone()],
+                    "n {n} lane {p} len {len}"
+                );
+                assert_eq!(
+                    narrow[r.clone()],
+                    expected[r.clone()],
+                    "u64 n {n} lane {p} len {len}"
+                );
+                assert_eq!(buf[r.clone()], expected[r], "sse2 n {n} lane {p} len {len}");
             }
         }
     }
